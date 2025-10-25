@@ -12,3 +12,8 @@ otel.runtime.go
 otel-pkg.gz
 pkg_temp
 coverage.txt
+
+# E2E test artifacts
+test/e2e/testdata/*/testapp
+test/e2e/testdata/*/.otel-build
+test/e2e/testdata/*/go.sum

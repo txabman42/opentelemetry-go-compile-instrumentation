@@ -1,0 +1,9 @@
+=setupOpenTelemetry=
+[MyHook] start to instrument hello world!
+traceContext from parent goroutine: traceID: 123, spanID: 456
+[MyHook] hello world is instrumented!
+[MyHook] after hook executed!
+Hello, World!
+Before MyStruct.Example()
+MyStruct.Example
+After MyStruct.Example()

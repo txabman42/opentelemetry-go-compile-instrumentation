@@ -5,6 +5,7 @@
 BINARY_NAME := otel
 DEMO_DIR := demo
 TOOL_DIR := tool/cmd
+E2E_DIR := test/e2e
 INST_PKG_GZIP = otel-pkg.gz
 INST_PKG_TMP = pkg_temp
 API_SYNC_SOURCE = pkg/inst/context.go
@@ -48,10 +49,19 @@ demo: build
 	@echo "Running demo..."
 	@./$(DEMO_DIR)/demo
 
-# Clean build artifacts
+# Run E2E tests
+.PHONY: test-e2e
+test-e2e: build
+	@echo "Running E2E tests..."
+	@cd $(E2E_DIR) && go test -v -timeout 5m ./...
+
 .PHONY: clean
 clean:
 	@echo "Cleaning build artifacts..."
 	rm -f $(BINARY_NAME)
 	rm -f $(DEMO_DIR)/demo
 	rm -rf $(DEMO_DIR)/.otel-build
+	@echo "Cleaning E2E test artifacts..."
+	find $(E2E_DIR)/testdata -type f -name "testapp" -delete
+	find $(E2E_DIR)/testdata -type d -name ".otel-build" -exec rm -rf {} + 2>/dev/null || true
+	find $(E2E_DIR)/testdata -type f -name "go.sum" -delete
