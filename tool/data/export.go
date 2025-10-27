@@ -9,7 +9,8 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
 
-//go:embed *
+//go:embed *.yaml otel-pkg.gz
+//nolint:typecheck // otel-pkg.gz is generated during packaging
 var dataFs embed.FS
 
 // ListEmbedFiles lists all the files in the embedded data
