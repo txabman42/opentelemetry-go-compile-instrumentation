@@ -321,22 +321,11 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 		return err
 	}
 
-	// Generate var decl and append it to the target file, note that many target
-	// functions may match the same hook function, it's a fatal error to append
-	// multiple hook function declarations to the same file, so we need to check
-	// if the hook function variable is already declared in the target file
-	fnName := makeOnXName(t, before)
-	funcDecl := &dst.FuncDecl{
-		Name: ast.Ident(fnName),
-		Type: &dst.FuncType{
-			Func:   false,
-			Params: paramTypes,
-		},
-	}
-	exist := ast.FindFuncDeclWithoutRecv(ip.target, fnName)
-	if exist == nil {
-		ip.addDecl(funcDecl)
-	}
+	// NOTE: Hook function declarations are now generated in the setup phase
+	// within otel.runtime.go using go:linkname directives. We no longer generate
+	// them here to avoid duplicate symbol declarations when both files are
+	// compiled together. The setup phase's genHookLinkNames() handles all hook
+	// declarations in a single location.
 	return nil
 }
 

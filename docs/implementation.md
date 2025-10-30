@@ -49,9 +49,12 @@ var Hook func()
 
 ## 2. Linkage via golinkname
 
-The `Hook` function is linked to the monitoring code using the `//go:linkname`
-directive. This allows us to dynamically associate the hook with the target
-function at compile time.
+The `Hook` function is linked to the monitoring code using automatically generated
+`//go:linkname` directives. During the setup phase, the tool analyzes the hook
+configuration and generates the necessary linkname directives in the target package. 
+The generated linkname directives allow us to dynamically associate hooks with target
+functions at compile time without requiring hook authors to understand the internals
+of Go's linkname mechanism.
 
 # Implementation Details
 
@@ -79,11 +82,11 @@ From the build_plan.txt file, the tool extracts all third-party module paths
 The hook configuration is specified by [ux-design.md](ux-design.md),
 which includes the `ImportPath` field where the target function resides. The tool
 matches this `ImportPath` against the pre-collected third-party dependencies and
-generates a file (e.g., otel_import.go) to import the SDK and corresponding hook
-packages for matched dependency
+generates a file (e.g., otel.runtime.go) to import the SDK and corresponding hook
+packages for matched dependency.
 
 ```go
-// otel_importer.go
+// otel.runtime.go
 package main
 
 // Import the SDK for shared utilities
@@ -92,6 +95,13 @@ import _ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk
 // Import hooks for specific third-party libraries
 import _ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk/hook/redis"
 import _ "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk/hook/gin"
+
+// Auto-generated go:linkname directives to link hook implementations
+//go:linkname MyHookBefore github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk/hook/redis.MyHookBefore
+func MyHookBefore()
+
+//go:linkname MyHookAfter github.com/open-telemetry/opentelemetry-go-compile-instrumentation/sdk/hook/redis.MyHookAfter
+func MyHookAfter()
 ```
 
 After adding the dependency, `go mod tidy` is run to update the `go.mod` file.
