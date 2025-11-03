@@ -4,7 +4,9 @@
 package setup
 
 import (
+	"context"
 	"strings"
+	"sync"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/data"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -12,6 +14,7 @@ import (
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"golang.org/x/mod/semver"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 )
 
@@ -205,7 +208,7 @@ func (sp *SetupPhase) runMatch(dependency *Dependency, allRules []rule.InstRule)
 	return set, nil
 }
 
-func (sp *SetupPhase) matchDeps(deps []*Dependency) ([]*rule.InstRuleSet, error) {
+func (sp *SetupPhase) matchDeps(ctx context.Context, deps []*Dependency) ([]*rule.InstRuleSet, error) {
 	// Construct the set of default allRules by parsing embedded data
 	allRules, err := materalizeRules()
 	if err != nil {
@@ -218,15 +221,27 @@ func (sp *SetupPhase) matchDeps(deps []*Dependency) ([]*rule.InstRuleSet, error)
 
 	// Match the default rules with the found dependencies
 	matched := make([]*rule.InstRuleSet, 0)
+	var mu sync.Mutex
+	g, _ := errgroup.WithContext(ctx)
+
 	for _, dep := range deps {
-		// TODO: Parallelize this
-		m, err1 := sp.runMatch(dep, allRules)
-		if err1 != nil {
-			return nil, err1
-		}
-		if !m.IsEmpty() {
-			matched = append(matched, m)
-		}
+		dep := dep // capture loop variable
+		g.Go(func() error {
+			m, err1 := sp.runMatch(dep, allRules)
+			if err1 != nil {
+				return err1
+			}
+			if !m.IsEmpty() {
+				mu.Lock()
+				matched = append(matched, m)
+				mu.Unlock()
+			}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return matched, nil
 }
