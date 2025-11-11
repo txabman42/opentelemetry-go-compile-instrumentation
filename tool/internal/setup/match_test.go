@@ -257,7 +257,7 @@ func testCreateRuleFromFieldsCase(t *testing.T, tt struct {
 		return // Expected YAML parsing to fail
 	}
 
-	createdRule, err := createRuleFromFields([]byte(tt.yamlContent), tt.ruleName, fields)
+	createdRule, err := rule.CreateRuleFromFields([]byte(tt.yamlContent), tt.ruleName, fields)
 
 	if tt.expectError {
 		if err == nil {
