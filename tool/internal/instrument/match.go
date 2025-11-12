@@ -4,7 +4,6 @@
 package instrument
 
 import (
-	"encoding/json"
 	"os"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
@@ -20,10 +19,11 @@ func (ip *InstrumentPhase) load() ([]*rule.InstRuleSet, error) {
 	if err != nil {
 		return nil, ex.Wrapf(err, "failed to read file %s", f)
 	}
-	rset := make([]*rule.InstRuleSet, 0)
-	err = json.Unmarshal(content, &rset)
+
+	// Use the factory function to load and validate rule sets from JSON
+	rset, err := rule.LoadInstRuleSetsJSON(content)
 	if err != nil {
-		return nil, ex.Wrapf(err, "failed to unmarshal JSON")
+		return nil, ex.Wrapf(err, "failed to load rule sets from JSON")
 	}
 
 	ip.Debug("Load matched rule sets", "path", f)

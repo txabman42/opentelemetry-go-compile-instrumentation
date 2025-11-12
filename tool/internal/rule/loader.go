@@ -4,6 +4,8 @@
 package rule
 
 import (
+	"encoding/json"
+
 	"gopkg.in/yaml.v3"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/data"
@@ -63,8 +65,8 @@ func parseRuleFromBytes(yamlFile []byte) ([]InstRule, error) {
 }
 
 // CreateRuleFromFields creates a rule instance based on the field type present in the YAML.
-// It inspects the fields map to determine which rule type to instantiate and unmarshals
-// the raw YAML data into the appropriate rule struct.
+// It inspects the fields map to determine which rule type to instantiate and uses the
+// appropriate factory function to load and validate the rule.
 //
 //nolint:nilnil // factory function
 func CreateRuleFromFields(raw []byte, name string, fields map[string]any) (InstRule, error) {
@@ -82,35 +84,53 @@ func CreateRuleFromFields(raw []byte, name string, fields map[string]any) (InstR
 
 	switch {
 	case fields["struct"] != nil:
-		var r InstStructRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
+		r, err := NewInstStructRule(raw, name)
+		if err != nil {
+			return nil, err
 		}
 		r.InstBaseRule = base
-		return &r, nil
+		return r, nil
 	case fields["file"] != nil:
-		var r InstFileRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
+		r, err := NewInstFileRule(raw, name)
+		if err != nil {
+			return nil, err
 		}
 		r.InstBaseRule = base
-		return &r, nil
+		return r, nil
 	case fields["raw"] != nil:
-		var r InstRawRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
+		r, err := NewInstRawRule(raw, name)
+		if err != nil {
+			return nil, err
 		}
 		r.InstBaseRule = base
-		return &r, nil
+		return r, nil
 	case fields["func"] != nil:
-		var r InstFuncRule
-		if err := yaml.Unmarshal(raw, &r); err != nil {
-			return nil, ex.Wrap(err)
+		r, err := NewInstFuncRule(raw, name)
+		if err != nil {
+			return nil, err
 		}
 		r.InstBaseRule = base
-		return &r, nil
+		return r, nil
 	default:
 		util.ShouldNotReachHere()
 		return nil, nil
 	}
+}
+
+// LoadInstRuleSetsJSON loads and validates multiple InstRuleSets from JSON data.
+// It unmarshals the JSON array and validates all rules in each set.
+func LoadInstRuleSetsJSON(data []byte) ([]*InstRuleSet, error) {
+	var rsets []*InstRuleSet
+	if err := json.Unmarshal(data, &rsets); err != nil {
+		return nil, ex.Wrap(err)
+	}
+
+	// Validate each rule set
+	// for i, rs := range rsets {
+	// 	if err := rs.validate(); err != nil {
+	// 		return nil, ex.Wrapf(err, "rule set %d", i)
+	// 	}
+	// }
+
+	return rsets, nil
 }

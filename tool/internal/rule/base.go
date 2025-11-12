@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
 
@@ -35,6 +36,10 @@ func (ibr *InstBaseRule) String() string     { return ibr.Name }
 func (ibr *InstBaseRule) GetName() string    { return ibr.Name }
 func (ibr *InstBaseRule) GetTarget() string  { return ibr.Target }
 func (ibr *InstBaseRule) GetVersion() string { return ibr.Version }
+
+func (ibr *InstBaseRule) validate() error {
+	return nil
+}
 
 // InstRuleSet represents a collection of instrumentation rules that apply to a
 // single Go package within a specific module. It acts as a container for rules,
@@ -128,4 +133,42 @@ func (irs *InstRuleSet) GetStructRules() []*InstStructRule {
 		rules = append(rules, rs...)
 	}
 	return rules
+}
+
+// GetRawRules returns all raw rules from the rule set.
+func (irs *InstRuleSet) GetRawRules() []*InstRawRule {
+	rules := make([]*InstRawRule, 0)
+	for _, rs := range irs.RawRules {
+		rules = append(rules, rs...)
+	}
+	return rules
+}
+
+// validate validates all rules in the rule set.
+func (irs *InstRuleSet) validate() error {
+	if irs.ModulePath == "" {
+		return ex.Newf("module path is empty")
+	}
+
+	for _, fr := range irs.FileRules {
+		if err := fr.validate(); err != nil {
+			return ex.Wrapf(err, "invalid file rule %q", fr.Name)
+		}
+	}
+	for _, fr := range irs.GetFuncRules() {
+		if err := fr.validate(); err != nil {
+			return ex.Wrapf(err, "invalid func rule %q", fr.Name)
+		}
+	}
+	for _, fr := range irs.GetRawRules() {
+		if err := fr.validate(); err != nil {
+			return ex.Wrapf(err, "invalid raw rule %q", fr.Name)
+		}
+	}
+	for _, fr := range irs.GetStructRules() {
+		if err := fr.validate(); err != nil {
+			return ex.Wrapf(err, "invalid struct rule %q", fr.Name)
+		}
+	}
+	return nil
 }
