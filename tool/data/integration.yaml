@@ -1,0 +1,111 @@
+# Integration test rules - all test cases consolidated
+# Each rule targets a different function to avoid conflicts when loaded together
+
+# Test case: after_only
+hook_after_only:
+  target: main
+  func: FuncAfterOnly
+  after: H1After
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/integration"
+
+# Test case: before_only
+hook_before_only:
+  target: main
+  func: FuncBeforeOnly
+  before: H1Before
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/integration"
+
+# Test case: func_rule_only
+hook_func_rule_only:
+  target: main
+  func: FuncRuleOnly
+  before: H1Before
+  after: H1After
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/integration"
+
+# Test case: func_and_raw_rules
+hook_func_and_raw:
+  target: main
+  func: FuncAndRaw
+  before: H1Before
+  after: H1After
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/integration"
+
+add_raw_func_and_raw:
+  target: main
+  func: FuncAndRaw
+  raw: |
+    _ = 456
+
+# Test case: raw_rule_only
+add_raw_only:
+  target: main
+  func: FuncRawOnly
+  raw: |
+    _ = 123
+
+# Test case: multiple_func_rules
+hook_func_multiple_1:
+  target: main
+  func: FuncMultipleHooks
+  before: H1Before
+  after: H1After
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/integration"
+
+hook_func_multiple_2:
+  target: main
+  func: FuncMultipleHooks
+  before: H2Before
+  after: H2After
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/integration"
+
+# Test case: method_receiver
+hook_method_receiver:
+  target: main
+  func: MethodFunc
+  recv: "*TMethod"
+  before: H3Before
+  after: H3After
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/integration"
+
+# Test case: struct_rule_only
+add_field_struct_only:
+  target: main
+  struct: TStructOnly
+  new_field:
+    - name: NewField
+      type: string
+
+# Test case: multiple_struct_fields
+add_multiple_fields:
+  target: main
+  struct: TMultipleFields
+  new_field:
+    - name: Field1
+      type: string
+    - name: Field2
+      type: int
+    - name: Field3
+      type: bool
+
+# Test case: combined_rules
+hook_func_combined:
+  target: main
+  func: FuncCombined
+  before: H1Before
+  after: H1After
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/integration"
+
+add_field_combined:
+  target: main
+  struct: TCombined
+  new_field:
+    - name: NewField
+      type: string
+
+add_raw_combined:
+  target: main
+  func: FuncCombined
+  raw: |
+    _ = 789
+

@@ -4,11 +4,13 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
@@ -33,17 +35,15 @@ func (sp *SetupPhase) keepForDebug(name string) {
 	}
 }
 
-// This function can be used to check if the setup has been completed.
-func isSetup() bool {
-	// TODO: Implement Task
-	return false
-}
-
 // Setup prepares the environment for further instrumentation.
-func Setup(ctx context.Context, args []string) error {
+func Setup(ctx context.Context, args []string, backupFiles []string) error {
 	logger := util.LoggerFromContext(ctx)
 
-	if isSetup() {
+	valid, err := isSetup(backupFiles)
+	if err != nil {
+		logger.WarnContext(ctx, "Failed to check setup validity, proceeding with setup", "error", err)
+	}
+	if valid {
 		logger.InfoContext(ctx, "Setup has already been completed, skipping setup.")
 		return nil
 	}
@@ -119,4 +119,113 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 	env = append(env, fmt.Sprintf("%s=%s", util.EnvOtelWorkDir, pwd))
 
 	return util.RunCmdWithEnv(ctx, env, newArgs...)
+}
+
+const (
+	backupDir = "backup" // Directory where original files are backed up
+)
+
+// isSetup checks if the setup has been completed and is still valid
+// Returns true if backup files match current files AND matched rule file exists
+// AND go.mod has the necessary replace directives
+func isSetup(dependencyFiles []string) (bool, error) {
+	matchedFile := util.GetMatchedRuleFile()
+	if !util.PathExists(matchedFile) {
+		return false, nil
+	}
+	backupPath := util.GetBuildTemp(backupDir)
+	if !util.PathExists(backupPath) {
+		return false, nil
+	}
+
+	required := map[string]bool{
+		"go.mod": false,
+		"go.sum": false,
+	}
+
+	// Compare each dependency file with its backup
+	for _, file := range dependencyFiles {
+		backupFile := filepath.Join(backupPath, filepath.Base(file))
+		base := filepath.Base(file)
+		fileExists := util.PathExists(file)
+		backupExists := util.PathExists(backupFile)
+		_, isRequired := required[base]
+
+		if isRequired {
+			if !fileExists || !backupExists {
+				return false, nil
+			}
+		} else {
+			if !fileExists || !backupExists {
+				continue
+			}
+		}
+
+		match, err := filesMatch(file, backupFile)
+		if err != nil {
+			return false, err
+		}
+		if !match {
+			return false, nil
+		}
+
+		if isRequired {
+			required[base] = true
+		}
+	}
+
+	for _, matched := range required {
+		if !matched {
+			return false, nil
+		}
+	}
+
+	// Check if go.mod has the necessary replace directives
+	// If matched rules exist, go.mod must have replace directives pointing to .otel-build/
+	hasReplace, err := checkReplaceDirectives()
+	if err != nil {
+		return false, err
+	}
+	if !hasReplace {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// checkReplaceDirectives checks if go.mod has replace directives pointing to .otel-build/
+func checkReplaceDirectives() (bool, error) {
+	const goModFile = "go.mod"
+	if !util.PathExists(goModFile) {
+		return false, nil
+	}
+
+	modfile, err := parseGoMod(goModFile)
+	if err != nil {
+		return false, err
+	}
+
+	buildTempDir := util.GetBuildTempDir()
+	for _, r := range modfile.Replace {
+		if strings.HasPrefix(r.New.Path, buildTempDir) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// filesMatch compares two files byte by byte
+func filesMatch(file1, file2 string) (bool, error) {
+	data1, err := os.ReadFile(filepath.Clean(file1))
+	if err != nil {
+		return false, ex.Wrapf(err, "failed to read %s", file1)
+	}
+
+	data2, err := os.ReadFile(filepath.Clean(file2))
+	if err != nil {
+		return false, ex.Wrapf(err, "failed to read %s", file2)
+	}
+
+	return bytes.Equal(data1, data2), nil
 }

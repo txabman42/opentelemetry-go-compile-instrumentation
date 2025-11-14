@@ -43,6 +43,9 @@ func copyBackupFiles(names []string, src, dst string) error {
 	var err error
 	for _, name := range names {
 		srcFile := filepath.Join(src, name)
+		if !PathExists(srcFile) {
+			continue
+		}
 		dstFile := filepath.Join(dst, name)
 		err = errors.Join(err, CopyFile(srcFile, dstFile))
 	}

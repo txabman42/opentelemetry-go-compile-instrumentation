@@ -21,6 +21,10 @@ const (
 	debugLogFilename = "debug.log"
 )
 
+var (
+	backupFiles = []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
+)
+
 func main() {
 	app := cli.Command{
 		Name:        "otel",
