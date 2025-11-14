@@ -6,205 +6,103 @@
 package instrument
 
 import (
-	"encoding/json"
-	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	matchedJSONFile = "matched.json"
-)
-
-func findGoToolCompile() string {
-	cmd := exec.Command("go", "env", "GOTOOLDIR")
-	output, err := cmd.Output()
-	if err != nil {
-		fmt.Printf("Error getting GOROOT: %v\n", err)
-		return ""
-	}
-
-	goroot := strings.TrimSpace(string(output))
-	if goroot == "" {
-		fmt.Println("GOROOT not set")
-		return ""
-	}
-	return filepath.Join(goroot, "compile")
-}
-
+// TestInstrument verifies that the complete instrumentation workflow works end-to-end.
+// This test uses the embedded helloworld instrumentation rules to verify that:
+//  1. The otel tool successfully wraps the go build command
+//  2. The setup phase finds and matches instrumentation rules
+//  3. The toolexec phase applies instrumentation during compilation
+//  4. The resulting binary executes the injected hooks
 func TestInstrument(t *testing.T) {
-	tests := []struct {
-		name    string
-		wantErr bool
-	}{
-		{"valid compile with instrumentation", false},
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
-	ctx := util.ContextWithLogger(t.Context(), logger)
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tempDir := setupTestEnvironment(t)
-
-			args := createCompileArgs(tempDir)
-			err := Toolexec(ctx, args)
-			if tt.wantErr {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
-			// TODO: Link the instrumented binary and run it and further check
-			// output content
-		})
-	}
-}
-
-func setupTestEnvironment(t *testing.T) string {
 	tempDir := t.TempDir()
-	t.Setenv(util.EnvOtelWorkDir, tempDir)
+	setupTestFiles(t, tempDir)
 
-	// Create source code file
-	mainGoFile := filepath.Join(tempDir, "main.go")
-	err := os.MkdirAll(filepath.Dir(mainGoFile), 0o755)
-	require.NoError(t, err)
-	err = util.CopyFile(filepath.Join("testdata", "source.go"), mainGoFile)
-	require.NoError(t, err)
+	// Build with instrumentation using the full otel workflow.
+	buildWithInstrumentation(t, tempDir)
 
-	// Create matched.json with test rules
-	matchedJSON, err := createTestRuleJSON(mainGoFile)
-	require.NoError(t, err)
-	matchedFile := filepath.Join(tempDir, util.BuildTempDir, matchedJSONFile)
-	err = os.MkdirAll(filepath.Dir(matchedFile), 0o755)
-	require.NoError(t, err)
-	err = util.WriteFile(matchedFile, string(matchedJSON))
-	require.NoError(t, err)
+	// Verify the binary was created.
+	binaryPath := filepath.Join(tempDir, "test")
+	require.FileExists(t, binaryPath)
 
-	return tempDir
+	// Run and verify instrumentation was applied.
+	output := runBinary(t, binaryPath)
+	require.Contains(t, output, "MyHook", "embedded hook should be executed")
 }
 
-func createCompileArgs(tempDir string) []string {
-	sourcePath := filepath.Join(tempDir, "main.go")
-	outputPath := filepath.Join(tempDir, "_pkg_.a")
-	compilePath := findGoToolCompile()
+func buildWithInstrumentation(t *testing.T, appDir string) {
+	t.Helper()
 
-	return []string{
-		compilePath,
-		"-o", outputPath,
-		"-p", "main",
-		"-complete",
-		"-buildid", "foo/bar",
-		"-pack",
-		sourcePath,
-	}
+	pwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	// Navigate to workspace root (3 levels up from tool/internal/instrument).
+	otelPath := filepath.Join(pwd, "..", "..", "..", "otel")
+
+	cmd := exec.Command(otelPath, "go", "build", "-a")
+	cmd.Dir = appDir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "build failed: %s", string(out))
 }
 
-func createTestRuleJSON(mainGoFile string) ([]byte, error) {
-	ruleSet := []*rule.InstRuleSet{
-		{
-			PackageName: "main",
-			ModulePath:  "main",
-			FuncRules: map[string][]*rule.InstFuncRule{
-				mainGoFile: {
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_func",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func1",
-						Before: "H1Before",
-						After:  "H1After",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_same_func",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func1",
-						Before: "H2Before",
-						After:  "H2After",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_func_with_recv",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func1",
-						Recv:   "*T",
-						Before: "H3Before",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "hook_func_no_before",
-							Target: "main",
-						},
-						Path:  filepath.Join(".", "testdata"),
-						Func:  "Func1",
-						Recv:  "*T",
-						After: "H3After",
-					},
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "underscore_param",
-							Target: "main",
-						},
-						Path:   filepath.Join(".", "testdata"),
-						Func:   "Func2",
-						Before: "H4Before",
-					},
-				},
-			},
-			RawRules: map[string][]*rule.InstRawRule{
-				mainGoFile: {
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "add_raw_code",
-							Target: "main",
-						},
-						Func: "Func1",
-						Raw:  "func2()",
-					},
-				},
-			},
-			StructRules: map[string][]*rule.InstStructRule{
-				mainGoFile: {
-					{
-						InstBaseRule: rule.InstBaseRule{
-							Name:   "add_new_field",
-							Target: "main",
-						},
-						Struct: "T",
-						NewField: []*rule.InstStructField{
-							{
-								Name: "NewField",
-								Type: "string",
-							},
-						},
-					},
-				},
-			},
-			FileRules: []*rule.InstFileRule{
-				{
-					InstBaseRule: rule.InstBaseRule{
-						Name:   "add_new_file",
-						Target: "main",
-					},
-					File: "newfile.go",
-					Path: filepath.Join(".", "testdata"),
-				},
-			},
-		},
-	}
-	return json.Marshal(ruleSet)
+func runBinary(t *testing.T, binaryPath string) string {
+	t.Helper()
+
+	cmd := exec.Command(binaryPath)
+	cmd.Dir = filepath.Dir(binaryPath)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "binary execution failed: %s", string(output))
+	return string(output)
+}
+
+func setupTestFiles(t *testing.T, tempDir string) {
+	t.Helper()
+
+	// Calculate workspace root path for consistent replace directive.
+	pwd, err := os.Getwd()
+	require.NoError(t, err)
+	workspaceRoot := filepath.Join(pwd, "..", "..", "..")
+	pkgPath := filepath.Join(workspaceRoot, "pkg")
+
+	// Create a simple main.go that uses the Example function (for helloworld instrumentation).
+	mainContent := `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+type MyStruct struct{}
+
+func (m *MyStruct) Example() { println("MyStruct.Example") }
+
+// Example demonstrates how to use the instrumenter.
+func Example() {
+	println("Original Example function")
+}
+
+func main() {
+	Example()
+	m := &MyStruct{}
+	m.Example()
+}
+`
+	err = os.WriteFile(filepath.Join(tempDir, "main.go"), []byte(mainContent), 0o644)
+	require.NoError(t, err)
+
+	// Create go.mod.
+	goModContent := `module test
+
+go 1.23
+
+require github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0
+
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ` + pkgPath + `
+`
+	err = os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goModContent), 0o644)
+	require.NoError(t, err)
 }

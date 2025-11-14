@@ -3,61 +3,62 @@
 
 package main
 
-import (
-	"fmt"
-	"runtime"
-	"time"
+// Structs for different test cases
+type TMethod struct{}
+type TStructOnly struct{}
+type TMultipleFields struct{}
+type TCombined struct{}
 
-	"golang.org/x/time/rate"
-)
-
-type traceContext struct {
-	traceID string
-	spanID  string
+// Methods
+func (t *TMethod) MethodFunc(p1 string, p2 int) (float32, error) {
+	return 0.0, nil
 }
 
-func (tc *traceContext) String() string {
-	return fmt.Sprintf("traceID: %s, spanID: %s", tc.traceID, tc.spanID)
+// Functions for different test cases
+func FuncAfterOnly(p1 string, p2 int) (float32, error) {
+	println("FuncAfterOnly")
+	return 0.0, nil
 }
 
-func (tc *traceContext) Clone() interface{} {
-	return &traceContext{
-		traceID: tc.traceID,
-		spanID:  tc.spanID,
-	}
+func FuncBeforeOnly(p1 string, p2 int) (float32, error) {
+	println("FuncBeforeOnly")
+	return 0.0, nil
 }
 
-type MyStruct struct{}
-
-func (m *MyStruct) Example() { println("MyStruct.Example") }
-
-// Example demonstrates how to use the instrumenter.
-func Example() {
-	// Output:
-	// [MyHook] start to instrument hello world!
-	// [MyHook] hello world is instrumented!
+func FuncRuleOnly(p1 string, p2 int) (float32, error) {
+	println("FuncRuleOnly")
+	return 0.0, nil
 }
 
-func Underscore(_ int, _ float32) {}
+func FuncAndRaw(p1 string, p2 int) (float32, error) {
+	println("FuncAndRaw")
+	return 0.0, nil
+}
+
+func FuncRawOnly(p1 string, p2 int) (float32, error) {
+	println("FuncRawOnly")
+	return 0.0, nil
+}
+
+func FuncMultipleHooks(p1 string, p2 int) (float32, error) {
+	println("FuncMultipleHooks")
+	return 0.0, nil
+}
+
+func FuncCombined(p1 string, p2 int) (float32, error) {
+	println("FuncCombined")
+	return 0.0, nil
+}
 
 func main() {
-	context := &traceContext{
-		traceID: "123",
-		spanID:  "456",
-	}
-	runtime.SetTraceContextToGLS(context)
-
-	go func() {
-		fmt.Printf("traceContext from parent goroutine: %s\n", runtime.GetTraceContextFromGLS())
-	}()
-
-	// Call the Example function to trigger the instrumentation
-	Example()
-	m := &MyStruct{}
-	// Add a new field to the struct
-	m.NewField = "abc"
-	m.Example()
-
-	// Call real module function
-	println(rate.Every(time.Duration(1)))
+	FuncAfterOnly("test", 1)
+	FuncBeforeOnly("test", 2)
+	FuncRuleOnly("test", 3)
+	FuncAndRaw("test", 4)
+	FuncRawOnly("test", 5)
+	FuncMultipleHooks("test", 6)
+	FuncCombined("test", 7)
+	
+	t := &TMethod{}
+	t.MethodFunc("test", 8)
 }

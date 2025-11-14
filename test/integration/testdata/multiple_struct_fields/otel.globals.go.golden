@@ -1,0 +1,2 @@
+// This file should not exist - struct rules don't generate otel.globals.go
+
