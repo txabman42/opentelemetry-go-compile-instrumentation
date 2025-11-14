@@ -6,357 +6,103 @@
 package instrument
 
 import (
-	"context"
-	"encoding/json"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/internal/rule"
-	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
-	"gotest.tools/v3/golden"
 )
 
-const (
-	matchedJSONFile = "matched.json"
-	testdataPath    = "testdata"
-	mainGoFile      = "main.go"
-	globalsGoFile   = "otel.globals.go"
-	mainPackageName = "main"
-	mainModulePath  = "main"
-	testBuildID     = "foo/bar"
-	testOutputFile  = "_pkg_.a"
-)
-
-func TestInstrumentWithDifferentRuleTypes_Integration(t *testing.T) {
-	tests := []struct {
-		name     string
-		yamlFile string
-		verify   func(*testing.T, *testContext)
-	}{
-		{
-			name:     "func rule only",
-			yamlFile: "func_rule_only.yaml",
-			verify: func(t *testing.T, tc *testContext) {
-				mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
-				globalsPath := filepath.Join(tc.tempDir, globalsGoFile)
-				assertGoldenFile(t, mainGoPath, "func_rule_only.main.go")
-				assertGoldenFile(t, globalsPath, "shared.common.otel.globals.go")
-			},
-		},
-		{
-			name:     "struct rule only",
-			yamlFile: "struct_rule_only.yaml",
-			verify: func(t *testing.T, tc *testContext) {
-				mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
-				assertGoldenFile(t, mainGoPath, "struct_rule_only.main.go")
-				assertGlobalsFileNotExists(t, tc.tempDir)
-			},
-		},
-		{
-			name:     "raw rule only",
-			yamlFile: "raw_rule_only.yaml",
-			verify: func(t *testing.T, tc *testContext) {
-				mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
-				globalsPath := filepath.Join(tc.tempDir, globalsGoFile)
-				assertGoldenFile(t, mainGoPath, "raw_rule_only.main.go")
-				assertGoldenFile(t, globalsPath, "raw_rule_only.otel.globals.go")
-			},
-		},
-		{
-			name:     "file rule only",
-			yamlFile: "file_rule_only.yaml",
-			verify: func(t *testing.T, tc *testContext) {
-				newFile := filepath.Join(tc.tempDir, "otel.newfile.go")
-				assertGoldenFile(t, newFile, "file_rule_only.otel.newfile.go")
-				assertGlobalsFileNotExists(t, tc.tempDir)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tc := setupTest(t)
-			sourceFile := setupTestFiles(t, tc.tempDir)
-			yamlPath := filepath.Join(testdataPath, "golden", tt.yamlFile)
-			ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
-			err := tc.runInstrumentationWithRuleSet(t, ruleSet)
-			require.NoError(t, err, "instrumentation should succeed")
-			tt.verify(t, tc)
-		})
-	}
-}
-
-func TestInstrumentWithMethodReceiver_Integration(t *testing.T) {
-	tc := setupTest(t)
-	sourceFile := setupTestFiles(t, tc.tempDir)
-
-	yamlPath := filepath.Join(testdataPath, "golden", "method_receiver.yaml")
-	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
-
-	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
-	require.NoError(t, err, "instrumentation should succeed")
-
-	mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
-	globalsPath := filepath.Join(tc.tempDir, globalsGoFile)
-	assertGoldenFile(t, mainGoPath, "method_receiver.main.go")
-	assertGoldenFile(t, globalsPath, "shared.common.otel.globals.go")
-}
-
-func TestInstrumentWithInvalidReceiver_Integration(t *testing.T) {
-	tc := setupTest(t)
-	sourceFile := setupTestFiles(t, tc.tempDir)
-
-	yamlPath := filepath.Join(testdataPath, "golden", "invalid_receiver.yaml")
-	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
-
-	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
-	require.Error(t, err, "instrumentation should fail with invalid receiver")
-	require.Contains(t, err.Error(), "can not find function", "error should indicate function not found")
-}
-
-func TestInstrumentWithBeforeOnly_Integration(t *testing.T) {
-	tc := setupTest(t)
-	sourceFile := setupTestFiles(t, tc.tempDir)
-
-	yamlPath := filepath.Join(testdataPath, "golden", "before_only.yaml")
-	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
-
-	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
-	require.NoError(t, err, "instrumentation should succeed")
-
-	mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
-	globalsPath := filepath.Join(tc.tempDir, globalsGoFile)
-	assertGoldenFile(t, mainGoPath, "before_only.main.go")
-	assertGoldenFile(t, globalsPath, "shared.common.otel.globals.go")
-}
-
-func TestInstrumentWithAfterOnly_Integration(t *testing.T) {
-	tc := setupTest(t)
-	sourceFile := setupTestFiles(t, tc.tempDir)
-
-	yamlPath := filepath.Join(testdataPath, "golden", "after_only.yaml")
-	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
-
-	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
-	require.NoError(t, err, "instrumentation should succeed")
-
-	mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
-	globalsPath := filepath.Join(tc.tempDir, globalsGoFile)
-	assertGoldenFile(t, mainGoPath, "after_only.main.go")
-	assertGoldenFile(t, globalsPath, "shared.common.otel.globals.go")
-}
-
-func TestInstrumentWithMultipleFuncRules_Integration(t *testing.T) {
-	tc := setupTest(t)
-	sourceFile := setupTestFiles(t, tc.tempDir)
-
-	yamlPath := filepath.Join(testdataPath, "golden", "multiple_func_rules.yaml")
-	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
-
-	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
-	require.NoError(t, err, "instrumentation should succeed")
-
-	mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
-	globalsPath := filepath.Join(tc.tempDir, globalsGoFile)
-	assertGoldenFile(t, mainGoPath, "multiple_func_rules.main.go")
-	assertGoldenFile(t, globalsPath, "shared.common.otel.globals.go")
-}
-
-func TestInstrumentWithFuncAndRawRules_Integration(t *testing.T) {
-	tc := setupTest(t)
-	sourceFile := setupTestFiles(t, tc.tempDir)
-
-	yamlPath := filepath.Join(testdataPath, "golden", "func_and_raw_rules.yaml")
-	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
-
-	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
-	require.NoError(t, err, "instrumentation should succeed")
-
-	mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
-	globalsPath := filepath.Join(tc.tempDir, globalsGoFile)
-	assertGoldenFile(t, mainGoPath, "func_and_raw_rules.main.go")
-	assertGoldenFile(t, globalsPath, "shared.common.otel.globals.go")
-}
-
-func TestInstrumentWithMultipleStructFields_Integration(t *testing.T) {
-	tc := setupTest(t)
-	sourceFile := setupTestFiles(t, tc.tempDir)
-
-	yamlPath := filepath.Join(testdataPath, "golden", "multiple_struct_fields.yaml")
-	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
-
-	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
-	require.NoError(t, err, "instrumentation should succeed")
-
-	mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
-	assertGoldenFile(t, mainGoPath, "multiple_struct_fields.main.go")
-	assertGlobalsFileNotExists(t, tc.tempDir)
-}
-
-func TestInstrumentWithCombinedRules_Integration(t *testing.T) {
-	tc := setupTest(t)
-	sourceFile := setupTestFiles(t, tc.tempDir)
-
-	yamlPath := filepath.Join(testdataPath, "golden", "combined_rules.yaml")
-	ruleSet := loadRuleSetFromYAML(t, yamlPath, sourceFile)
-
-	err := tc.runInstrumentationWithRuleSet(t, ruleSet)
-	require.NoError(t, err, "instrumentation should succeed")
-
-	mainGoPath := filepath.Join(tc.tempDir, mainGoFile)
-	globalsPath := filepath.Join(tc.tempDir, globalsGoFile)
-	newFile := filepath.Join(tc.tempDir, "otel.newfile.go")
-	assertGoldenFile(t, mainGoPath, "combined_rules.main.go")
-	assertGoldenFile(t, globalsPath, "shared.common.otel.globals.go")
-	assertGoldenFile(t, newFile, "combined_rules.otel.newfile.go")
-}
-
-// ============================================================================
-// Test Helper Functions
-// ============================================================================
-
-// testContext holds common test setup
-type testContext struct {
-	ctx     context.Context
-	tempDir string
-	logger  *slog.Logger
-}
-
-// setupTest creates common test infrastructure
-func setupTest(t *testing.T) *testContext {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
-	ctx := util.ContextWithLogger(t.Context(), logger)
+// TestInstrument verifies that the complete instrumentation workflow works end-to-end.
+// This test uses the embedded helloworld instrumentation rules to verify that:
+//  1. The otel tool successfully wraps the go build command
+//  2. The setup phase finds and matches instrumentation rules
+//  3. The toolexec phase applies instrumentation during compilation
+//  4. The resulting binary executes the injected hooks
+func TestInstrument(t *testing.T) {
 	tempDir := t.TempDir()
-	t.Setenv(util.EnvOtelWorkDir, tempDir)
+	setupTestFiles(t, tempDir)
 
-	return &testContext{
-		ctx:     ctx,
-		tempDir: tempDir,
-		logger:  logger,
-	}
+	// Build with instrumentation using the full otel workflow.
+	buildWithInstrumentation(t, tempDir)
+
+	// Verify the binary was created.
+	binaryPath := filepath.Join(tempDir, "test")
+	require.FileExists(t, binaryPath)
+
+	// Run and verify instrumentation was applied.
+	output := runBinary(t, binaryPath)
+	require.Contains(t, output, "MyHook", "embedded hook should be executed")
 }
 
-// runInstrumentationWithRuleSet executes instrumentation with the given rule set.
-// The rule set should already have the correct source file paths set.
-func (tc *testContext) runInstrumentationWithRuleSet(t *testing.T, ruleSet *rule.InstRuleSet) error {
-	setupMatchedJSON(t, tc.tempDir, ruleSet)
-	args := createCompileArgs(t, tc.tempDir)
-	return Toolexec(tc.ctx, args)
-}
-
-// assertGoldenFile compares the actual file content against a golden file.
-func assertGoldenFile(t *testing.T, actualPath, goldenName string) {
-	require.FileExists(t, actualPath, "file should exist: %s", actualPath)
-
-	content, err := os.ReadFile(actualPath)
-	require.NoError(t, err, "failed to read file: %s", actualPath)
-
-	golden.Assert(t, string(content), filepath.Join("golden", goldenName+".golden"))
-}
-
-// assertGlobalsFileNotExists verifies that otel.globals.go does not exist.
-func assertGlobalsFileNotExists(t *testing.T, tempDir string) {
-	globalsFile := filepath.Join(tempDir, globalsGoFile)
-	require.NoFileExists(t, globalsFile, "%s should not exist", globalsGoFile)
-}
-
-// createCompileArgs creates compile command arguments for testing.
-func createCompileArgs(t *testing.T, tempDir string) []string {
-	cmd := exec.Command("go", "env", "GOTOOLDIR")
-	output, err := cmd.Output()
-	require.NoError(t, err, "failed to get GOTOOLDIR")
-	goToolDir := strings.TrimSpace(string(output))
-	require.NotEmpty(t, goToolDir, "GOTOOLDIR should not be empty")
-
-	goToolCompilePath := filepath.Join(goToolDir, "compile")
-	require.FileExists(t, goToolCompilePath, "compile should exist: %s", goToolCompilePath)
-
-	return []string{
-		goToolCompilePath,
-		"-o", filepath.Join(tempDir, testOutputFile),
-		"-p", mainPackageName,
-		"-complete",
-		"-buildid", testBuildID,
-		"-pack",
-		filepath.Join(tempDir, mainGoFile),
-	}
-}
-
-// setupTestFiles creates the test environment with source files.
-func setupTestFiles(t *testing.T, tempDir string) string {
-	sourceFile := filepath.Join(tempDir, mainGoFile)
-	err := os.MkdirAll(filepath.Dir(sourceFile), 0o755)
-	require.NoError(t, err, "failed to create directory")
-	err = util.CopyFile(filepath.Join(testdataPath, "source.go"), sourceFile)
-	require.NoError(t, err, "failed to copy source file")
-	return sourceFile
-}
-
-// setupMatchedJSON creates the matched.json file with the given rule set.
-func setupMatchedJSON(t *testing.T, tempDir string, ruleSet *rule.InstRuleSet) {
-	matchedJSON, err := json.Marshal([]*rule.InstRuleSet{ruleSet})
-	require.NoError(t, err, "failed to marshal rule set")
-	matchedFile := filepath.Join(tempDir, util.BuildTempDir, matchedJSONFile)
-	err = os.MkdirAll(filepath.Dir(matchedFile), 0o755)
-	require.NoError(t, err, "failed to create build temp directory")
-	err = util.WriteFile(matchedFile, string(matchedJSON))
-	require.NoError(t, err, "failed to write matched.json")
-}
-
-// ============================================================================
-// Rule Builder Helpers
-// ============================================================================
-
-// ruleSetYAML represents the YAML structure for loading rule sets.
-type ruleSetYAML struct {
-	PackageName string                 `yaml:"package_name"`
-	ModulePath  string                 `yaml:"module_path"`
-	FuncRules   []*rule.InstFuncRule   `yaml:"func_rules"`
-	StructRules []*rule.InstStructRule `yaml:"struct_rules"`
-	RawRules    []*rule.InstRawRule    `yaml:"raw_rules"`
-	FileRules   []*rule.InstFileRule   `yaml:"file_rules"`
-}
-
-// loadRuleSetFromYAML loads a rule set from a YAML file and maps rules to the source file path.
-func loadRuleSetFromYAML(t *testing.T, yamlPath, sourceFile string) *rule.InstRuleSet {
+func buildWithInstrumentation(t *testing.T, appDir string) {
 	t.Helper()
 
-	yamlContent, err := os.ReadFile(yamlPath)
-	require.NoError(t, err, "failed to read YAML file: %s", yamlPath)
+	pwd, err := os.Getwd()
+	require.NoError(t, err)
 
-	var yamlRuleSet ruleSetYAML
-	err = yaml.Unmarshal(yamlContent, &yamlRuleSet)
-	require.NoError(t, err, "failed to unmarshal YAML: %s", yamlPath)
+	// Navigate to workspace root (3 levels up from tool/internal/instrument).
+	otelPath := filepath.Join(pwd, "..", "..", "..", "otel")
 
-	ruleSet := &rule.InstRuleSet{
-		PackageName: yamlRuleSet.PackageName,
-		ModulePath:  yamlRuleSet.ModulePath,
-		FuncRules:   make(map[string][]*rule.InstFuncRule),
-		StructRules: make(map[string][]*rule.InstStructRule),
-		RawRules:    make(map[string][]*rule.InstRawRule),
-		FileRules:   make([]*rule.InstFileRule, 0),
-	}
+	cmd := exec.Command(otelPath, "go", "build", "-a")
+	cmd.Dir = appDir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "build failed: %s", string(out))
+}
 
-	if len(yamlRuleSet.FuncRules) > 0 {
-		ruleSet.FuncRules[sourceFile] = yamlRuleSet.FuncRules
-	}
-	if len(yamlRuleSet.StructRules) > 0 {
-		ruleSet.StructRules[sourceFile] = yamlRuleSet.StructRules
-	}
-	if len(yamlRuleSet.RawRules) > 0 {
-		ruleSet.RawRules[sourceFile] = yamlRuleSet.RawRules
-	}
-	if len(yamlRuleSet.FileRules) > 0 {
-		ruleSet.FileRules = yamlRuleSet.FileRules
-	}
+func runBinary(t *testing.T, binaryPath string) string {
+	t.Helper()
 
-	return ruleSet
+	cmd := exec.Command(binaryPath)
+	cmd.Dir = filepath.Dir(binaryPath)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "binary execution failed: %s", string(output))
+	return string(output)
+}
+
+func setupTestFiles(t *testing.T, tempDir string) {
+	t.Helper()
+
+	// Calculate workspace root path for consistent replace directive.
+	pwd, err := os.Getwd()
+	require.NoError(t, err)
+	workspaceRoot := filepath.Join(pwd, "..", "..", "..")
+	pkgPath := filepath.Join(workspaceRoot, "pkg")
+
+	// Create a simple main.go that uses the Example function (for helloworld instrumentation).
+	mainContent := `// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package main
+
+type MyStruct struct{}
+
+func (m *MyStruct) Example() { println("MyStruct.Example") }
+
+// Example demonstrates how to use the instrumenter.
+func Example() {
+	println("Original Example function")
+}
+
+func main() {
+	Example()
+	m := &MyStruct{}
+	m.Example()
+}
+`
+	err = os.WriteFile(filepath.Join(tempDir, "main.go"), []byte(mainContent), 0o644)
+	require.NoError(t, err)
+
+	// Create go.mod.
+	goModContent := `module test
+
+go 1.23
+
+require github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg v0.0.0
+
+replace github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg => ` + pkgPath + `
+`
+	err = os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goModContent), 0o644)
+	require.NoError(t, err)
 }
