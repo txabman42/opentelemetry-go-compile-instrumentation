@@ -38,6 +38,20 @@ func Example() {
 	// [MyHook] hello world is instrumented!
 }
 
+type Number interface {
+	int64 | float64
+}
+
+func GenericExample[T any](p T) { println("Hello, Generic World!", p) }
+
+type genericLookupTable[K comparable, V Number] map[K]V
+
+func GenericLookupTableExample[K comparable, V Number](key K, value V) map[K]V {
+	table := make(genericLookupTable[K, V])
+	table[key] = value
+	return table
+}
+
 func Underscore(_ int, _ float32) {}
 
 func main() {
@@ -53,6 +67,11 @@ func main() {
 
 	// Call the Example function to trigger the instrumentation
 	Example()
+
+	GenericExample(1)
+
+	_ = GenericLookupTableExample(1, 2.0)
+
 	m := &MyStruct{}
 	// Add a new field to the struct
 	m.NewField = "abc"

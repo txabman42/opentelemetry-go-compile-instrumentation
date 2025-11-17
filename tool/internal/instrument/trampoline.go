@@ -247,7 +247,7 @@ func getHookParamTraits(t *rule.InstFuncRule, before bool) ([]ParamTrait, error)
 	return attrs, nil
 }
 
-func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule, traits []ParamTrait) error {
+func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule, traits []ParamTrait, hookFunc *dst.FuncDecl) error {
 	// The actual parameter list of hook function should be the same as the
 	// target function
 	if len(traits) != (len(ip.beforeHookFunc.Type.Params.List) + 1) {
@@ -268,17 +268,18 @@ func (ip *InstrumentPhase) callBeforeHook(t *rule.InstFuncRule, traits []ParamTr
 		}
 	}
 	fnName := makeOnXName(t, true)
-	call := ast.ExprStmt(ast.CallTo(fnName, args))
+	call := ast.CallTo(fnName, args)
+	callStmt := ast.ExprStmt(call)
 	iff := ast.IfNotNilStmt(
 		ast.Ident(fnName),
-		ast.Block(call),
+		ast.Block(callStmt),
 		nil,
 	)
 	insertAt(ip.beforeHookFunc, iff, len(ip.beforeHookFunc.Body.List)-1)
 	return nil
 }
 
-func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTrait) error {
+func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTrait, hookFunc *dst.FuncDecl) error {
 	// The actual parameter list of hook function should be the same as the
 	// target function
 	if len(traits) != len(ip.afterHookFunc.Type.Params.List) {
@@ -305,10 +306,11 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTra
 		}
 	}
 	fnName := makeOnXName(t, false)
-	call := ast.ExprStmt(ast.CallTo(fnName, args))
+	call := ast.CallTo(fnName, args)
+	callStmt := ast.ExprStmt(call)
 	iff := ast.IfNotNilStmt(
 		ast.Ident(fnName),
-		ast.Block(call),
+		ast.Block(callStmt),
 		nil,
 	)
 	insertAtEnd(ip.afterHookFunc, iff)
@@ -317,7 +319,8 @@ func (ip *InstrumentPhase) callAfterHook(t *rule.InstFuncRule, traits []ParamTra
 
 func rectifyAnyType(paramList *dst.FieldList, traits []ParamTrait) error {
 	if len(paramList.List) != len(traits) {
-		return ex.New("hook func signature can not match with target function")
+		return ex.Newf("hook func signature can not match with target function: paramList has %d params, traits has %d",
+			len(paramList.List), len(traits))
 	}
 	for i, field := range paramList.List {
 		trait := traits[i]
@@ -339,6 +342,11 @@ func (ip *InstrumentPhase) addHookFuncVar(t *rule.InstFuncRule,
 	err := rectifyAnyType(paramTypes, traits)
 	if err != nil {
 		return err
+	}
+	// For generic target functions, replace type parameters with interface{}
+	// in the linkname declaration (since linkname doesn't support generics)
+	for _, field := range paramTypes.List {
+		field.Type = replaceTypeParamsWithAny(field.Type, ip.targetFunc.Type.TypeParams)
 	}
 
 	// Generate var decl and append it to the target file, note that many target
@@ -467,6 +475,9 @@ func (ip *InstrumentPhase) buildTrampolineTypes() {
 		}
 	}
 	addHookContext(afterHookFunc.Type.Params)
+	// Preserve type parameters from the target function for generic functions
+	beforeHookFunc.Type.TypeParams = ast.CloneTypeParams(ip.targetFunc.Type.TypeParams)
+	afterHookFunc.Type.TypeParams = ast.CloneTypeParams(ip.targetFunc.Type.TypeParams)
 }
 
 func assignString(assignStmt *dst.AssignStmt, val string) bool {
@@ -644,6 +655,60 @@ func desugarType(param *dst.Field) dst.Expr {
 	return param.Type
 }
 
+// isTypeParameter checks if a type expression is a bare type parameter identifier
+func isTypeParameter(t dst.Expr, typeParams *dst.FieldList) bool {
+	if typeParams == nil {
+		return false
+	}
+	ident, ok := t.(*dst.Ident)
+	if !ok {
+		return false
+	}
+	// Check if this identifier matches any type parameter name
+	for _, field := range typeParams.List {
+		for _, name := range field.Names {
+			if name.Name == ident.Name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// replaceTypeParamsWithAny replaces type parameters with interface{} for use in
+// non-generic contexts like HookContextImpl methods
+func replaceTypeParamsWithAny(t dst.Expr, typeParams *dst.FieldList) dst.Expr {
+	if isTypeParameter(t, typeParams) {
+		return ast.InterfaceType()
+	}
+	// For complex types like *T, []T, map[K]V, etc., we need to handle them recursively
+	switch typ := t.(type) {
+	case *dst.StarExpr:
+		// *T -> *interface{}
+		replaced := replaceTypeParamsWithAny(typ.X, typeParams)
+		if replaced != typ.X {
+			return ast.DereferenceOf(replaced)
+		}
+	case *dst.ArrayType:
+		// []T -> []interface{}
+		replaced := replaceTypeParamsWithAny(typ.Elt, typeParams)
+		if replaced != typ.Elt {
+			return ast.ArrayType(replaced)
+		}
+	case *dst.MapType:
+		// map[K]V -> map[interface{}]interface{}
+		replacedKey := replaceTypeParamsWithAny(typ.Key, typeParams)
+		replacedValue := replaceTypeParamsWithAny(typ.Value, typeParams)
+		if replacedKey != typ.Key || replacedValue != typ.Value {
+			return &dst.MapType{
+				Key:   replacedKey,
+				Value: replacedValue,
+			}
+		}
+	}
+	return t
+}
+
 func (ip *InstrumentPhase) rewriteHookContext() {
 	const expectMinMethodCount = 4
 	util.Assert(len(ip.hookCtxMethods) > expectMinMethodCount, "sanity check")
@@ -677,6 +742,8 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 	idx := 0
 	if ast.HasReceiver(ip.targetFunc) {
 		recvType := ip.targetFunc.Recv.List[0].Type
+		// Replace type parameters with interface{} for use in non-generic context
+		recvType = replaceTypeParamsWithAny(recvType, ip.targetFunc.Type.TypeParams)
 		clause := setParamClause(idx, recvType)
 		methodSetParamBody.List = append(methodSetParamBody.List, clause)
 		clause = getParamClause(idx, recvType)
@@ -685,6 +752,8 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 	}
 	for _, param := range ip.targetFunc.Type.Params.List {
 		paramType := desugarType(param)
+		// Replace type parameters with interface{} for use in non-generic context
+		paramType = replaceTypeParamsWithAny(paramType, ip.targetFunc.Type.TypeParams)
 		for range param.Names {
 			clause := setParamClause(idx, paramType)
 			methodSetParamBody.List = append(methodSetParamBody.List, clause)
@@ -698,6 +767,8 @@ func (ip *InstrumentPhase) rewriteHookContext() {
 		idx = 0
 		for _, retval := range ip.targetFunc.Type.Results.List {
 			retType := desugarType(retval)
+			// Replace type parameters with interface{} for use in non-generic context
+			retType = replaceTypeParamsWithAny(retType, ip.targetFunc.Type.TypeParams)
 			for range retval.Names {
 				clause := getReturnValClause(idx, retType)
 				methodGetRetValBody.List = append(methodGetRetValBody.List, clause)
@@ -714,6 +785,11 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 	if err != nil {
 		return err
 	}
+	// Get the actual hook function to check if it's generic
+	hookFunc, err := getHookFunc(t, before)
+	if err != nil {
+		return err
+	}
 	// Add the body-less real hook function declaration. They will be linked to
 	// the real hook function.
 	err = ip.addHookFuncVar(t, traits, before)
@@ -722,9 +798,9 @@ func (ip *InstrumentPhase) callHookFunc(t *rule.InstFuncRule, before bool) error
 	}
 	// Add the function call to the real hook code.
 	if before {
-		err = ip.callBeforeHook(t, traits)
+		err = ip.callBeforeHook(t, traits, hookFunc)
 	} else {
-		err = ip.callAfterHook(t, traits)
+		err = ip.callAfterHook(t, traits, hookFunc)
 	}
 	if err != nil {
 		return err

@@ -72,3 +72,33 @@ func MyHook1After(ictx inst.HookContext) {
 }
 
 func BeforeUnderscore(ictx inst.HookContext, _ int, _ float32) {}
+
+// MyHookGenericBefore is called before GenericExample[T]
+// Since go:linkname doesn't support generic functions, we use interface{} instead
+func MyHookGenericBefore(ictx inst.HookContext, _ interface{}) {
+	println("GenericExample before hook")
+}
+
+// MyHookGenericAfter is called after GenericExample[T]
+// Since go:linkname doesn't support generic functions, we use interface{} instead
+func MyHookGenericAfter(ictx inst.HookContext) {
+	println("GenericExample after hook")
+}
+
+type Number interface {
+	int64 | float64
+}
+
+// MyHookGenericLookupTableBefore is called before GenericLookupTableExample[K, V]
+// Since go:linkname doesn't support generic functions, we use interface{} instead
+// key will be of type K (comparable), value will be of type V (Number constraint)
+func MyHookGenericLookupTableBefore(ictx inst.HookContext, key interface{}, value interface{}) {
+	println("GenericLookupTableExample before hook")
+}
+
+// MyHookGenericLookupTableAfter is called after GenericLookupTableExample[K, V]
+// Since go:linkname doesn't support generic functions, we use interface{} instead
+// result will be *map[K]V where K is comparable and V satisfies Number constraint
+func MyHookGenericLookupTableAfter(ictx inst.HookContext, result interface{}) {
+	println("GenericLookupTableExample after hook")
+}

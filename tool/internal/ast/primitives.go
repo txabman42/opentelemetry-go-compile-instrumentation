@@ -50,6 +50,42 @@ func CallTo(name string, args []dst.Expr) *dst.CallExpr {
 	}
 }
 
+// CallToGeneric creates a call expression to a generic function with explicit type arguments.
+// For example: CallToGeneric("Foo", typeArgs, args) creates Foo[T1, T2](args...)
+func CallToGeneric(name string, typeArgs *dst.FieldList, args []dst.Expr) *dst.CallExpr {
+	if typeArgs == nil || len(typeArgs.List) == 0 {
+		// Not generic, use regular call
+		return CallTo(name, args)
+	}
+	// Build type argument list for the instantiation
+	// For a function with [T any], we create an IndexListExpr with T as the index
+	var indices []dst.Expr
+	for _, field := range typeArgs.List {
+		for _, ident := range field.Names {
+			indices = append(indices, Ident(ident.Name))
+		}
+	}
+	// Create indexed expression for generic instantiation
+	var fun dst.Expr
+	if len(indices) == 1 {
+		// Single type parameter: Foo[T]
+		fun = &dst.IndexExpr{
+			X:     Ident(name),
+			Index: indices[0],
+		}
+	} else {
+		// Multiple type parameters: Foo[T1, T2]
+		fun = &dst.IndexListExpr{
+			X:       Ident(name),
+			Indices: indices,
+		}
+	}
+	return &dst.CallExpr{
+		Fun:  fun,
+		Args: args,
+	}
+}
+
 func StringLit(value string) *dst.BasicLit {
 	return &dst.BasicLit{
 		Kind:  token.STRING,
@@ -263,4 +299,15 @@ func LineComments(comments ...string) dst.NodeDecs {
 		Before: dst.NewLine,
 		Start:  dst.Decorations(comments),
 	}
+}
+
+// CloneTypeParams safely clones a type parameter field list for generic functions.
+// Returns nil if the input is nil.
+func CloneTypeParams(typeParams *dst.FieldList) *dst.FieldList {
+	if typeParams == nil {
+		return nil
+	}
+	cloned, ok := dst.Clone(typeParams).(*dst.FieldList)
+	util.Assert(ok, "typeParams is not a FieldList")
+	return cloned
 }

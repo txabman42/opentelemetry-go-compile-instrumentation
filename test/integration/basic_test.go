@@ -31,4 +31,9 @@ func TestBasic(t *testing.T) {
 	for _, e := range expect {
 		require.Contains(t, output, e)
 	}
+	require.Contains(t, output, "GenericExample before hook")
+	require.Contains(t, output, "Hello, Generic World!")
+	require.Contains(t, output, "GenericExample after hook")
+	require.Contains(t, output, "GenericLookupTableExample before hook")
+	require.Contains(t, output, "GenericLookupTableExample after hook")
 }
