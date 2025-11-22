@@ -44,6 +44,112 @@ func runModTidy(ctx context.Context) error {
 	return util.RunCmd(ctx, "go", "mod", "tidy")
 }
 
+// copyInstrumentationToVendor copies the instrumentation packages to vendor directory
+// since go mod vendor doesn't copy local replace directives
+func (sp *SetupPhase) copyInstrumentationToVendor(matched []*rule.InstRuleSet) error {
+	// Collect all instrumentation package paths
+	pkgPaths := make(map[string]string) // module path -> local path
+
+	// Add the base pkg module
+	oldPath := util.OtelRoot + "/pkg"
+	newPath := filepath.Join(util.GetBuildTempDir(), "pkg")
+	pkgPaths[oldPath] = newPath
+
+	// Add instrumentation modules
+	for _, m := range matched {
+		funcRules := m.GetFuncRules()
+		for _, rule := range funcRules {
+			if !strings.HasPrefix(rule.Path, util.OtelRoot) {
+				continue
+			}
+			oldPath := rule.Path
+			newPath := strings.TrimPrefix(oldPath, util.OtelRoot)
+			newPath = filepath.Join(util.GetBuildTempDir(), newPath)
+			pkgPaths[oldPath] = newPath
+		}
+	}
+
+	// Copy each package to vendor/
+	for modulePath, localPath := range pkgPaths {
+		// Convert module path to vendor path
+		vendorPath := filepath.Join("vendor", modulePath)
+
+		// Check if source exists
+		if !util.PathExists(localPath) {
+			sp.Warn("Instrumentation package not found", "path", localPath)
+			continue
+		}
+
+		// Copy directory recursively
+		sp.Info("Copying instrumentation package to vendor", "from", localPath, "to", vendorPath)
+		err := copyDir(localPath, vendorPath)
+		if err != nil {
+			return ex.Wrapf(err, "failed to copy instrumentation package to vendor")
+		}
+	}
+
+	return nil
+}
+
+// copyDir recursively copies a directory
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Calculate relative path
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+
+		// Calculate destination path
+		dstPath := filepath.Join(dst, relPath)
+
+		// If it's a directory, create it
+		if info.IsDir() {
+			return os.MkdirAll(dstPath, info.Mode())
+		}
+
+		// If it's a file, copy it
+		return util.CopyFile(path, dstPath)
+	})
+}
+
+// fixVendorModulesTxt removes replace directives for instrumentation packages in vendor/modules.txt
+// so Go uses the vendored files instead of looking in .otel-build
+func (sp *SetupPhase) fixVendorModulesTxt() error {
+	modulesFile := "vendor/modules.txt"
+	content, err := os.ReadFile(modulesFile)
+	if err != nil {
+		return ex.Wrapf(err, "failed to read vendor/modules.txt")
+	}
+
+	lines := strings.Split(string(content), "\n")
+	var newLines []string
+
+	for _, line := range lines {
+		// Remove replace directives that point to .otel-build
+		if strings.Contains(line, "opentelemetry-go-compile-instrumentation") &&
+			strings.Contains(line, "=> /") &&
+			strings.Contains(line, ".otel-build") {
+			// Skip this line (it's a replace directive)
+			sp.Debug("Removing replace directive from vendor/modules.txt", "line", line)
+			continue
+		}
+		newLines = append(newLines, line)
+	}
+
+	err = os.WriteFile(modulesFile, []byte(strings.Join(newLines, "\n")), 0644)
+	if err != nil {
+		return ex.Wrapf(err, "failed to write vendor/modules.txt")
+	}
+
+	sp.Info("Updated vendor/modules.txt to remove replace directives")
+	return nil
+}
+
 func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (bool, error) {
 	hasReplace := false
 	for _, r := range modfile.Replace {
@@ -121,6 +227,25 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet)
 		err = runModTidy(ctx)
 		if err != nil {
 			return err
+		}
+		// Check if vendor directory exists and sync it
+		if util.PathExists("vendor") {
+			sp.Info("Vendor directory detected, syncing vendor/modules.txt")
+			err = util.RunCmd(ctx, "go", "mod", "vendor")
+			if err != nil {
+				return ex.Wrapf(err, "failed to sync vendor directory")
+			}
+			// go mod vendor doesn't copy local replace directives to vendor/
+			// so we need to manually copy the instrumentation packages
+			err = sp.copyInstrumentationToVendor(matched)
+			if err != nil {
+				return err
+			}
+			// Update vendor/modules.txt to remove replace paths
+			err = sp.fixVendorModulesTxt()
+			if err != nil {
+				return err
+			}
 		}
 		sp.keepForDebug(goModFile)
 	}
