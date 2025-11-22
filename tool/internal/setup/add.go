@@ -5,6 +5,8 @@ package setup
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/dave/dst"
 
@@ -111,7 +113,7 @@ func buildOtelRuntimeAst(decls []dst.Decl) *dst.File {
 	}
 }
 
-func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet) error {
+func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet, packagePath string) error {
 	rules := make([]*rule.InstFuncRule, 0)
 	for _, m := range matched {
 		funcRules := m.GetFuncRules()
@@ -127,11 +129,25 @@ func (sp *SetupPhase) addDeps(matched []*rule.InstRuleSet) error {
 	varDecls := genVarDecl(rules)
 	// Build the ast
 	root := buildOtelRuntimeAst(append(importDecls, varDecls...))
+	
+	// Determine where to write the otel.runtime.go file
+	// It should be in the main package directory, not the working directory
+	runtimeFilePath := OtelRuntimeFile
+	if packagePath != "" && packagePath != "." {
+		runtimeFilePath = filepath.Join(packagePath, OtelRuntimeFile)
+		// Ensure the directory exists
+		dir := filepath.Dir(runtimeFilePath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+	
 	// Write the ast to file
-	err := ast.WriteFile(OtelRuntimeFile, root)
+	err := ast.WriteFile(runtimeFilePath, root)
 	if err != nil {
 		return err
 	}
-	sp.keepForDebug(OtelRuntimeFile)
+	sp.keepForDebug(runtimeFilePath)
+	sp.Info("Created otel.runtime.go", "path", runtimeFilePath)
 	return nil
 }

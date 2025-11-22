@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
@@ -39,6 +40,39 @@ func isSetup() bool {
 	return false
 }
 
+// extractPackagePath extracts the package path from build arguments
+// E.g., for "go build -a ./app/vmctl", it returns "./app/vmctl"
+// For "go build -a", it returns "." (current directory)
+func extractPackagePath(args []string) string {
+	// Args typically look like: ["build", "-a", "./app/vmctl"] or ["build", "-a"]
+	// Find the package path after the command and flags
+	foundCommand := false
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		// Identify the go command (build, install, run, test)
+		if arg == "build" || arg == "install" || arg == "run" || arg == "test" {
+			foundCommand = true
+			continue
+		}
+
+		// Skip flags (arguments starting with -)
+		if strings.HasPrefix(arg, "-") {
+			// Some flags take values, but they also start with - so we can skip them
+			continue
+		}
+
+		// After we've found the command, the next non-flag argument is the package path
+		if foundCommand && arg != "" {
+			// This is the package path
+			return arg
+		}
+	}
+
+	// No explicit package path found, use current directory
+	return "."
+}
+
 // Setup prepares the environment for further instrumentation.
 func Setup(ctx context.Context, args []string) error {
 	logger := util.LoggerFromContext(ctx)
@@ -51,6 +85,17 @@ func Setup(ctx context.Context, args []string) error {
 	sp := &SetupPhase{
 		logger: logger,
 	}
+
+	// If vendor directory exists, sync it with go.mod before starting
+	// This handles the case where vendor/ is out of sync from a previous run
+	if util.PathExists("vendor") {
+		sp.Info("Syncing vendor directory with go.mod before setup")
+		err := util.RunCmd(ctx, "go", "mod", "vendor")
+		if err != nil {
+			sp.Warn("Failed to sync vendor directory before setup", "error", err)
+			// Continue anyway - the sync during setup might fix it
+		}
+	}
 	// Find all dependencies of the project being build
 	deps, err := sp.findDeps(ctx, args)
 	if err != nil {
@@ -61,8 +106,10 @@ func Setup(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Determine the package path from build args (e.g., "./app/vmctl" from "go build -a ./app/vmctl")
+	packagePath := extractPackagePath(args)
 	// Introduce additional hook code by generating otel.instrumentation.go
-	err = sp.addDeps(matched)
+	err = sp.addDeps(matched, packagePath)
 	if err != nil {
 		return err
 	}
@@ -95,7 +142,7 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 		return ex.Wrapf(err, "failed to get executable path")
 	}
 	insert := "-toolexec=" + execPath + " toolexec"
-	const additionalCount = 2
+	const additionalCount = 3                               // -work, -toolexec, -a, -mod
 	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
 	// Add "go build"
 	newArgs = append(newArgs, "go")
@@ -108,6 +155,11 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 	// to force rebuild here.
 	// Add "-a" to force rebuild
 	newArgs = append(newArgs, "-a")
+	// If vendor directory exists, use -mod=mod to bypass vendor and use go.mod
+	if util.PathExists("vendor") {
+		newArgs = append(newArgs, "-mod=mod")
+		logger.InfoContext(ctx, "Using -mod=mod to bypass vendor directory")
+	}
 	// Add the rest
 	newArgs = append(newArgs, args[1:]...)
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
@@ -128,15 +180,27 @@ func GoBuild(ctx context.Context, args []string) error {
 	if err != nil {
 		logger.DebugContext(ctx, "failed to back up files", "error", err)
 	}
+
+	// Determine package path to know where otel.runtime.go will be created
+	packagePath := extractPackagePath(args)
+	runtimeFilePath := OtelRuntimeFile
+	if packagePath != "" && packagePath != "." {
+		runtimeFilePath = filepath.Join(packagePath, OtelRuntimeFile)
+	}
+
 	defer func() {
-		err = os.RemoveAll(OtelRuntimeFile)
+		err = os.RemoveAll(runtimeFilePath)
 		if err != nil {
-			logger.DebugContext(ctx, "failed to remove otel runtime file", "error", err)
+			logger.DebugContext(ctx, "failed to remove otel runtime file", "error", err, "path", runtimeFilePath)
 		}
 		err = util.RestoreFile(backupFiles)
 		if err != nil {
 			logger.DebugContext(ctx, "failed to restore files", "error", err)
 		}
+		// Note: We don't re-run go mod vendor here because:
+		// 1. The instrumentation packages were manually copied to vendor/
+		// 2. Running go mod vendor would remove them since they're not in the restored go.mod
+		// 3. The next build will sync vendor/ at the beginning of Setup if needed
 	}()
 
 	err = Setup(ctx, os.Args[1:])

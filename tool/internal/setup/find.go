@@ -81,6 +81,11 @@ func (sp *SetupPhase) listBuildPlan(ctx context.Context, goBuildCmd []string) ([
 	args := []string{}
 	args = append(args, goBuildCmd[:goBuildMinArgs]...) // go build/install
 	args = append(args, []string{"-a", "-x", "-n"}...)  // -a -x -n
+	// If vendor directory exists, use -mod=mod to bypass vendor
+	if util.PathExists("vendor") {
+		args = append(args, "-mod=mod")
+		sp.Info("Using -mod=mod for build plan to bypass vendor directory")
+	}
 	if len(goBuildCmd) > goBuildMinArgs {               // {...} remaining
 		args = append(args, goBuildCmd[goBuildMinArgs:]...)
 	}
