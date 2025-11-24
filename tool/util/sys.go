@@ -72,6 +72,39 @@ func CopyFile(src, dst string) error {
 	return nil
 }
 
+func CopyPath(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return ex.Wrap(err)
+	}
+	if info.IsDir() {
+		return CopyDir(src, dst)
+	}
+	return CopyFile(src, dst)
+}
+
+func CopyDir(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		targetPath := filepath.Join(dst, relPath)
+
+		if d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			return os.MkdirAll(targetPath, info.Mode())
+		}
+		return CopyFile(path, targetPath)
+	})
+}
+
 func CRC32(s string) string {
 	crc32Hash := crc32.ChecksumIEEE([]byte(s))
 	return strconv.FormatUint(uint64(crc32Hash), 10)

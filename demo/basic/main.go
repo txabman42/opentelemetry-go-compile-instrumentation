@@ -5,7 +5,6 @@ package main
 
 import (
 	"fmt"
-	"runtime"
 	"time"
 
 	"golang.org/x/time/rate"

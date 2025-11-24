@@ -44,7 +44,7 @@ func copyBackupFiles(names []string, src, dst string) error {
 	for _, name := range names {
 		srcFile := filepath.Join(src, name)
 		dstFile := filepath.Join(dst, name)
-		err = errors.Join(err, CopyFile(srcFile, dstFile))
+		err = errors.Join(err, CopyPath(srcFile, dstFile))
 	}
 	return err
 }
@@ -56,5 +56,12 @@ func BackupFile(names []string) error {
 
 // RestoreFile restores the source file from $BUILD_TEMP/backup/name.
 func RestoreFile(names []string) error {
-	return copyBackupFiles(names, GetBuildTemp("backup"), ".")
+	dstBase := "."
+	for _, name := range names {
+		dstPath := filepath.Join(dstBase, name)
+		if err := os.RemoveAll(dstPath); err != nil {
+			return err
+		}
+	}
+	return copyBackupFiles(names, GetBuildTemp("backup"), dstBase)
 }

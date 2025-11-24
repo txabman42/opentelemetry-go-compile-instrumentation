@@ -123,6 +123,9 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 func GoBuild(ctx context.Context, args []string) error {
 	logger := util.LoggerFromContext(ctx)
 	backupFiles := []string{"go.mod", "go.sum", "go.work", "go.work.sum"}
+	if util.PathExists("vendor") {
+		backupFiles = append(backupFiles, "vendor")
+	}
 	err := util.BackupFile(backupFiles)
 	if err != nil {
 		logger.DebugContext(ctx, "failed to back up files", "error", err)

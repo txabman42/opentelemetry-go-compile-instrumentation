@@ -44,6 +44,25 @@ func runModTidy(ctx context.Context) error {
 	return util.RunCmd(ctx, "go", "mod", "tidy")
 }
 
+func runModVendor(ctx context.Context) error {
+	return util.RunCmd(ctx, "go", "mod", "vendor")
+}
+
+func isVendor() bool {
+	return util.PathExists("vendor")
+}
+
+func runGoMod(ctx context.Context) error {
+	err := runModTidy(ctx)
+	if err != nil {
+		return err
+	}
+	if isVendor() {
+		return runModVendor(ctx)
+	}
+	return nil
+}
+
 func addReplace(modfile *modfile.File, path, version, rpath, rversion string) (bool, error) {
 	hasReplace := false
 	for _, r := range modfile.Replace {
@@ -118,7 +137,7 @@ func (sp *SetupPhase) syncDeps(ctx context.Context, matched []*rule.InstRuleSet)
 		if err != nil {
 			return err
 		}
-		err = runModTidy(ctx)
+		err = runGoMod(ctx)
 		if err != nil {
 			return err
 		}
