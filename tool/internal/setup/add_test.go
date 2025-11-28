@@ -65,6 +65,16 @@ func TestAddDeps(t *testing.T) {
 			},
 			goldenFile: "multiple_rule_sets.otel.runtime.go.golden",
 		},
+		{
+			name: "func_rule_with_hooks",
+			matched: []*rule.InstRuleSet{
+				newTestRuleSet(
+					"github.com/example/pkg",
+					newTestFuncRuleWithHooks("github.com/example/pkg", "github.com/example/pkg", "BeforeFunc", "AfterFunc"),
+				),
+			},
+			goldenFile: "func_rule_with_hooks.otel.runtime.go.golden",
+		},
 	}
 
 	for _, tt := range tests {
@@ -121,6 +131,17 @@ func newTestFuncRule(path, target string) *rule.InstFuncRule {
 			Target: target,
 		},
 		Path: path,
+	}
+}
+
+func newTestFuncRuleWithHooks(path, target, before, after string) *rule.InstFuncRule {
+	return &rule.InstFuncRule{
+		InstBaseRule: rule.InstBaseRule{
+			Target: target,
+		},
+		Path:   path,
+		Before: before,
+		After:  after,
 	}
 }
 

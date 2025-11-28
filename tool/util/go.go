@@ -4,6 +4,7 @@
 package util
 
 import (
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -92,6 +93,15 @@ func IsGoFile(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), ".go")
 }
 
+// GetPackageDir returns the directory containing the package's Go files.
+// Returns empty string if no Go files are found.
+func GetPackageDir(pkg *packages.Package) string {
+	if len(pkg.GoFiles) > 0 {
+		return filepath.Dir(pkg.GoFiles[0])
+	}
+	return ""
+}
+
 // flagsWithPathValues contains flags that accept a directory or file path as value.
 // From: go help build
 //
@@ -102,6 +112,34 @@ var flagsWithPathValues = map[string]bool{
 	"-overlay": true,
 	"-pgo":     true,
 	"-pkgdir":  true,
+}
+
+// SplitArgsAndPackages separates build flags from package patterns in build arguments.
+// Returns (flags, packagePatterns) where flags includes "build" and all flags,
+// and packagePatterns includes the package patterns at the end.
+// For example:
+//   - args ["build", "-a", "./app/vmctl", "./app/vmrestore"]
+//     returns (["build", "-a"], ["./app/vmctl", "./app/vmrestore"])
+func SplitArgsAndPackages(args []string) (flags []string, pkgPatterns []string) {
+	// Find the split point where package patterns start
+	splitIdx := len(args)
+	for i := len(args) - 1; i >= 0; i-- {
+		arg := args[i]
+
+		// If preceded by a flag that takes a path value, this is a flag value
+		if i > 0 && flagsWithPathValues[args[i-1]] {
+			splitIdx = i + 1
+			break
+		}
+
+		// If we hit a flag, stop. Packages come after all flags
+		if strings.HasPrefix(arg, "-") || arg == "go" || arg == "build" || arg == "install" {
+			splitIdx = i + 1
+			break
+		}
+	}
+
+	return args[:splitIdx], args[splitIdx:]
 }
 
 // GetBuildPackages loads all packages from the go build command arguments.
@@ -117,7 +155,7 @@ var flagsWithPathValues = map[string]bool{
 func GetBuildPackages(args []string) ([]*packages.Package, error) {
 	buildPkgs := make([]*packages.Package, 0)
 	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedModule,
+		Mode: packages.NeedName | packages.NeedModule | packages.NeedFiles,
 	}
 	found := false
 	for i := len(args) - 1; i >= 0; i-- {
