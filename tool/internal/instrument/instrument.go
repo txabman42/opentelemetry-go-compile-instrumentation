@@ -28,6 +28,28 @@ func groupRules(rset *rule.InstRuleSet) map[string][]rule.InstRule {
 	return file2rules
 }
 
+// filterRulesWithQuickCheck filters out rules for functions that definitely
+// don't exist in their target files. This is a performance optimization that
+// avoids expensive AST parsing for files that don't contain the target functions.
+func (ip *InstrumentPhase) filterRulesWithQuickCheck(file string, rules []rule.InstRule) []rule.InstRule {
+	filtered := make([]rule.InstRule, 0, len(rules))
+	for _, r := range rules {
+		switch rt := r.(type) {
+		case *rule.InstFuncRule:
+			// Quick check if the function might exist in this file
+			if quickFuncExistsCheck(file, rt.Func) {
+				filtered = append(filtered, r)
+			} else {
+				ip.Debug("Quick check: function not found, skipping", "file", file, "func", rt.Func)
+			}
+		default:
+			// For non-func rules (struct, raw), always include them
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
 func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 	hasFuncRule := false
 	// Apply file rules first because they can introduce new files that used
@@ -39,6 +61,14 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 		}
 	}
 	for file, rules := range groupRules(rset) {
+		// Strategy D: Quick check to filter out rules for non-existent functions
+		// This avoids expensive AST parsing for files that don't contain targets
+		filteredRules := ip.filterRulesWithQuickCheck(file, rules)
+		if len(filteredRules) == 0 {
+			ip.Debug("No matching rules after quick check, skipping file", "file", file)
+			continue
+		}
+
 		// Group rules by file, then parse the target file once
 		root, err := ip.parseFile(file)
 		if err != nil {
@@ -46,7 +76,7 @@ func (ip *InstrumentPhase) instrument(rset *rule.InstRuleSet) error {
 		}
 
 		// Apply the rules to the target file
-		for _, r := range rules {
+		for _, r := range filteredRules {
 			switch rt := r.(type) {
 			case *rule.InstFuncRule:
 				err1 := ip.applyFuncRule(rt, root)

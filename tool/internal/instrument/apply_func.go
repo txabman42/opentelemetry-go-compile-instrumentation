@@ -4,10 +4,13 @@
 package instrument
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
 	"go/parser"
+	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/dave/dst"
 
@@ -317,6 +320,37 @@ func (ip *InstrumentPhase) parseFile(file string) (*dst.File, error) {
 	// because they are associated with one certain file
 	ip.tjumps = make([]*TJump, 0)
 	return root, nil
+}
+
+// quickFuncExistsCheck performs a fast text-based check to see if a file
+// likely contains a function with the given name. This is used as a pre-filter
+// before doing expensive AST parsing.
+// Returns true if the function might exist (requires full AST check),
+// false if it definitely doesn't exist.
+func quickFuncExistsCheck(file string, funcName string) bool {
+	content, err := os.ReadFile(file)
+	if err != nil {
+		// If we can't read the file, assume the function might exist
+		return true
+	}
+
+	// Quick check: look for "func " followed by the function name
+	// This is a heuristic that catches most cases without full parsing
+	// Pattern: func (optional receiver) funcName(
+	// We use a simple byte search first for speed
+	funcBytes := []byte("func ")
+	nameBytes := []byte(funcName)
+
+	// First quick check: does the file contain both "func " and the function name?
+	if !bytes.Contains(content, funcBytes) || !bytes.Contains(content, nameBytes) {
+		return false
+	}
+
+	// More precise check using regex to match function declarations
+	// Pattern matches: func funcName( or func (recv) funcName(
+	pattern := fmt.Sprintf(`func\s+(\([^)]*\)\s+)?%s\s*[\[(]`, regexp.QuoteMeta(funcName))
+	matched, _ := regexp.Match(pattern, content)
+	return matched
 }
 
 func (ip *InstrumentPhase) applyFuncRule(rule *rule.InstFuncRule, root *dst.File) error {

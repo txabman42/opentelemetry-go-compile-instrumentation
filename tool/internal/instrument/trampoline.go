@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/token"
 	"strconv"
+	"sync"
 
 	"github.com/dave/dst"
 
@@ -67,6 +68,27 @@ const (
 //go:embed impl.tmpl
 var templateImpl string
 
+// cachedTemplateAST holds the parsed template AST to avoid re-parsing for each function.
+// This is a significant optimization since template parsing is expensive.
+var (
+	cachedTemplateAST     *dst.File
+	cachedTemplateASTOnce sync.Once
+	cachedTemplateASTErr  error
+)
+
+// getCachedTemplateAST returns the cached parsed template AST, parsing it only once.
+func getCachedTemplateAST() (*dst.File, error) {
+	cachedTemplateASTOnce.Do(func() {
+		p := ast.NewAstParser()
+		cachedTemplateAST, cachedTemplateASTErr = p.ParseSource(templateImpl)
+	})
+	if cachedTemplateASTErr != nil {
+		return nil, cachedTemplateASTErr
+	}
+	// Return a deep clone to avoid mutation of the cached AST
+	return util.AssertType[*dst.File](dst.Clone(cachedTemplateAST)), nil
+}
+
 func (ip *InstrumentPhase) addDecl(decl dst.Decl) {
 	util.Assert(ip.target != nil, "sanity check")
 	ip.target.Decls = append(ip.target.Decls, decl)
@@ -92,10 +114,9 @@ func (ip *InstrumentPhase) ensureUnsafeImport() {
 }
 
 func (ip *InstrumentPhase) materializeTemplate() error {
-	// Read trampoline template and materialize before and after function
-	// declarations based on that
-	p := ast.NewAstParser()
-	astRoot, err := p.ParseSource(templateImpl)
+	// Use cached template AST to avoid re-parsing for each function rule.
+	// This is a significant performance optimization for large codebases.
+	astRoot, err := getCachedTemplateAST()
 	if err != nil {
 		return err
 	}
