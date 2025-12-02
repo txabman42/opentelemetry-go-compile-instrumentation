@@ -13,7 +13,7 @@ import (
 )
 
 // load loads the matched rules from the build temp directory.
-// TODO: Shared memory across all sub-processes is possible
+// This is only called for packages that pass the fast module check (Strategy B/C).
 func (ip *InstrumentPhase) load() ([]*rule.InstRuleSet, error) {
 	f := util.GetMatchedRuleFile()
 	content, err := os.ReadFile(f)

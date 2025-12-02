@@ -7,12 +7,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
-	EnvOtelWorkDir = "OTEL_WORK_DIR"
-	BuildTempDir   = ".otel-build"
-	OtelRoot       = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
+	EnvOtelWorkDir        = "OTEL_WORK_DIR"
+	EnvOtelMatchedModules = "OTEL_MATCHED_MODULES"
+	BuildTempDir          = ".otel-build"
+	OtelRoot              = "github.com/open-telemetry/opentelemetry-go-compile-instrumentation"
 )
 
 func GetMatchedRuleFile() string {
@@ -57,4 +59,30 @@ func BackupFile(names []string) error {
 // RestoreFile restores the source file from $BUILD_TEMP/backup/name.
 func RestoreFile(names []string) error {
 	return copyBackupFiles(names, GetBuildTemp("backup"), ".")
+}
+
+// GetMatchedModules returns the list of matched module paths from environment.
+// Returns nil if the environment variable is not set.
+func GetMatchedModules() []string {
+	env := os.Getenv(EnvOtelMatchedModules)
+	if env == "" {
+		return nil
+	}
+	return strings.Split(env, ",")
+}
+
+// IsModuleMatched checks if the given module path is in the matched modules list.
+// This is a fast check that avoids loading the full rules JSON.
+func IsModuleMatched(modulePath string) bool {
+	modules := GetMatchedModules()
+	if modules == nil {
+		// Fallback: environment not set, need to check rules file
+		return true
+	}
+	for _, m := range modules {
+		if m == modulePath {
+			return true
+		}
+	}
+	return false
 }

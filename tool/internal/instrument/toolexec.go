@@ -110,14 +110,31 @@ func interceptCompile(ctx context.Context, args []string) ([]string, error) {
 // to find out the compile command we are interested in and run it with the
 // instrumented code.
 func Toolexec(ctx context.Context, args []string) error {
-	// Only interested in compile commands
-	if util.IsCompileCommand(strings.Join(args, " ")) {
-		var err error
-		args, err = interceptCompile(ctx, args)
-		if err != nil {
-			return err
-		}
+	logger := util.LoggerFromContext(ctx)
+
+	// Strategy A: Skip non-compile commands early
+	// This avoids all overhead for asm, link, and other commands
+	cmdLine := strings.Join(args, " ")
+	if !util.IsCompileCommand(cmdLine) {
+		// Fast path: just run the command as is, no overhead
+		return util.RunCmd(ctx, args...)
 	}
-	// Just run the command as is
+
+	// Strategy B: Fast module check before loading full rules
+	// Check if this package is in the matched modules list (from env var)
+	importPath := util.FindFlagValue(args, "-p")
+	if importPath != "" && !util.IsModuleMatched(importPath) {
+		// Fast path: module not in matched list, skip instrumentation
+		logger.Debug("Fast path: skipping unmatched module", "module", importPath)
+		return util.RunCmd(ctx, args...)
+	}
+
+	// Only load full rules and do instrumentation if we passed the fast checks
+	logger.Debug("Slow path: loading rules for potential match", "module", importPath)
+	var err error
+	args, err = interceptCompile(ctx, args)
+	if err != nil {
+		return err
+	}
 	return util.RunCmd(ctx, args...)
 }
