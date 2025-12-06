@@ -4,7 +4,10 @@
 package util
 
 import (
+	"path/filepath"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 )
@@ -88,4 +91,109 @@ func SplitCompileCmds(input string) []string {
 
 func IsGoFile(path string) bool {
 	return strings.HasSuffix(strings.ToLower(path), ".go")
+}
+
+// GetPackageDir returns the directory containing the package's Go files.
+// Returns empty string if no Go files are found.
+func GetPackageDir(pkg *packages.Package) string {
+	if len(pkg.GoFiles) > 0 {
+		return filepath.Dir(pkg.GoFiles[0])
+	}
+	return ""
+}
+
+// flagsWithPathValues contains flags that accept a directory or file path as value.
+// From: go help build
+//
+//nolint:gochecknoglobals // constant lookup table
+var flagsWithPathValues = map[string]bool{
+	"-o":       true,
+	"-modfile": true,
+	"-overlay": true,
+	"-pgo":     true,
+	"-pkgdir":  true,
+}
+
+// SplitArgsAndPackages separates build flags from package patterns in build arguments.
+// Returns (flags, packagePatterns) where flags includes "build" and all flags,
+// and packagePatterns includes the package patterns at the end.
+// For example:
+//   - args ["build", "-a", "./app/vmctl", "./app/vmrestore"]
+//     returns (["build", "-a"], ["./app/vmctl", "./app/vmrestore"])
+func SplitArgsAndPackages(args []string) (flags []string, pkgPatterns []string) {
+	// Find the split point where package patterns start
+	splitIdx := len(args)
+	for i := len(args) - 1; i >= 0; i-- {
+		arg := args[i]
+
+		// If preceded by a flag that takes a path value, this is a flag value
+		if i > 0 && flagsWithPathValues[args[i-1]] {
+			splitIdx = i + 1
+			break
+		}
+
+		// If we hit a flag, stop. Packages come after all flags
+		if strings.HasPrefix(arg, "-") || arg == "go" || arg == "build" || arg == "install" {
+			splitIdx = i + 1
+			break
+		}
+	}
+
+	return args[:splitIdx], args[splitIdx:]
+}
+
+// GetBuildPackages loads all packages from the go build command arguments.
+// Returns a list of loaded packages. If no package patterns are found in args,
+// defaults to loading the current directory package.
+// The args parameter should be the go build command arguments (e.g., ["build", "-a", "./cmd"]).
+// Returns an error if package loading fails or if invalid patterns are provided.
+// For example:
+//   - args ["build", "-a", "cmd/"] returns packages for "./cmd/"
+//   - args ["build", "-a", "./app/vmctl"] returns packages for "./app/vmctl"
+//   - args ["build", "-a", ".", "./cmd"] returns packages for both "." and "./cmd"
+//   - args ["build"] returns packages for "."
+func GetBuildPackages(args []string) ([]*packages.Package, error) {
+	buildPkgs := make([]*packages.Package, 0)
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedModule | packages.NeedFiles,
+	}
+	found := false
+	for i := len(args) - 1; i >= 0; i-- {
+		arg := args[i]
+
+		// If preceded by a flag that takes a path value, this is a flag value
+		// We want to avoid scenarios like "go build -o ./tmp ./app" where tmp also contains Go files,
+		// as it would be treated as a package.
+		if i > 0 && flagsWithPathValues[args[i-1]] {
+			break
+		}
+
+		// If we hit a flag, stop. Packages come after all flags
+		// go build [-o output] [build flags] [packages]
+		if strings.HasPrefix(arg, "-") || arg == "go" || arg == "build" || arg == "install" {
+			break
+		}
+
+		pkgs, err := packages.Load(cfg, arg)
+		if err != nil {
+			return nil, ex.Wrapf(err, "failed to load packages for pattern %s", arg)
+		}
+		for _, pkg := range pkgs {
+			if pkg.Errors != nil {
+				continue
+			}
+		}
+
+		buildPkgs = append(buildPkgs, pkgs...)
+		found = true
+	}
+
+	if !found {
+		var err error
+		buildPkgs, err = packages.Load(cfg, ".")
+		if err != nil {
+			return nil, ex.Wrapf(err, "failed to load packages for pattern .")
+		}
+	}
+	return buildPkgs, nil
 }

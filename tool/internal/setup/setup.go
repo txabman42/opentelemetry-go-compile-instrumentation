@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"golang.org/x/tools/go/packages"
+
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/ex"
 	"github.com/open-telemetry/opentelemetry-go-compile-instrumentation/tool/util"
 )
@@ -51,7 +53,15 @@ func Setup(ctx context.Context, args []string) error {
 	sp := &SetupPhase{
 		logger: logger,
 	}
-	// Find all dependencies of the project being build
+
+	// Get build packages to determine module directories
+	pkgs, err := util.GetBuildPackages(args)
+	if err != nil {
+		return err
+	}
+
+	// Global operations (executed once)
+	// Find all dependencies of the project being built
 	deps, err := sp.findDeps(ctx, args)
 	if err != nil {
 		return err
@@ -61,41 +71,86 @@ func Setup(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Introduce additional hook code by generating otel.instrumentation.go
-	err = sp.addDeps(matched)
-	if err != nil {
-		return err
-	}
 	// Extract the embedded instrumentation modules into local directory
 	err = sp.extract()
 	if err != nil {
 		return err
 	}
-	// Sync new dependencies to go.mod or vendor/modules.txt
-	err = sp.syncDeps(ctx, matched)
-	if err != nil {
-		return err
+
+	// Per-package operations
+	// Track processed directories to avoid generating otel.runtime.go multiple times
+	processedPkgDirs := make(map[string]bool)
+	processedModDirs := make(map[string]bool)
+	for _, pkg := range pkgs {
+		if pkg.Module == nil {
+			continue
+		}
+		moduleDir := pkg.Module.Dir
+		pkgDir := util.GetPackageDir(pkg)
+		if pkgDir == "" {
+			// Fallback to module directory if no Go files found
+			pkgDir = moduleDir
+		}
+
+		// Generate otel.runtime.go in the package directory (not module directory)
+		// This ensures the file is compiled with the correct main package
+		if !processedPkgDirs[pkgDir] {
+			processedPkgDirs[pkgDir] = true
+			err = sp.addDeps(matched, pkgDir)
+			if err != nil {
+				return err
+			}
+		}
+		// Sync new dependencies to go.mod (only once per module)
+		if !processedModDirs[moduleDir] {
+			processedModDirs[moduleDir] = true
+			err = sp.syncDeps(ctx, matched, moduleDir)
+			if err != nil {
+				return err
+			}
+		}
 	}
+
 	// Write the matched hook to matched.txt for further instrument phase
-	err = sp.store(matched)
-	if err != nil {
-		return err
-	}
-	return nil
+	return sp.store(matched)
 }
 
 // BuildWithToolexec builds the project with the toolexec mode
 func BuildWithToolexec(ctx context.Context, args []string) error {
 	logger := util.LoggerFromContext(ctx)
 
-	// Add -toolexec=otel to the original build command and run it
 	execPath, err := os.Executable()
 	if err != nil {
 		return ex.Wrapf(err, "failed to get executable path")
 	}
+
+	// Extract flags and package patterns from original args
+	flags, pkgPatterns := util.SplitArgsAndPackages(args)
+
+	// If multiple packages, build each one separately so binaries are created
+	// go build with multiple packages only compiles but doesn't produce binaries
+	if len(pkgPatterns) > 1 {
+		for _, pattern := range pkgPatterns {
+			err = buildSinglePackage(ctx, logger, execPath, flags, pattern)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Single package: build normally
+	return buildSinglePackage(ctx, logger, execPath, args, "")
+}
+
+// buildSinglePackage builds a single package with toolexec.
+// When pkgPattern is empty, args contains the full build args including package patterns.
+// When pkgPattern is non-empty, args contains only the flags (e.g., ["build", "-a"])
+// and pkgPattern is the specific package to build.
+func buildSinglePackage(ctx context.Context, logger *slog.Logger, execPath string, args []string, pkgPattern string) error {
 	insert := "-toolexec=" + execPath + " toolexec"
-	const additionalCount = 2
-	newArgs := make([]string, 0, len(args)+additionalCount) // Avoid in-place modification
+	const additionalCount = 4
+	newArgs := make([]string, 0, len(args)+additionalCount)
 	// Add "go build"
 	newArgs = append(newArgs, "go")
 	newArgs = append(newArgs, args[:1]...)
@@ -107,8 +162,17 @@ func BuildWithToolexec(ctx context.Context, args []string) error {
 	// to force rebuild here.
 	// Add "-a" to force rebuild
 	newArgs = append(newArgs, "-a")
-	// Add the rest
-	newArgs = append(newArgs, args[1:]...)
+
+	if pkgPattern != "" {
+		// Building a specific package from multi-package build
+		// args already contains only flags like ["build", "-a"], skip "build"
+		newArgs = append(newArgs, args[1:]...)
+		newArgs = append(newArgs, pkgPattern)
+	} else {
+		// Single package build: add the rest of the args (flags + package)
+		newArgs = append(newArgs, args[1:]...)
+	}
+
 	logger.InfoContext(ctx, "Running go build with toolexec", "args", newArgs)
 
 	// Tell the sub-process the working directory
@@ -128,16 +192,30 @@ func GoBuild(ctx context.Context, args []string) error {
 		logger.DebugContext(ctx, "failed to back up files", "error", err)
 	}
 	defer func() {
-		err = os.RemoveAll(OtelRuntimeFile)
+		var pkgs []*packages.Package
+		pkgs, err = util.GetBuildPackages(os.Args[1:])
 		if err != nil {
-			logger.DebugContext(ctx, "failed to remove otel runtime file", "error", err)
+			logger.DebugContext(ctx, "failed to get build packages", "error", err)
 		}
-		err = os.RemoveAll(unzippedPkgDir)
-		if err != nil {
+		// Track removed directories to avoid duplicate cleanup
+		removedDirs := make(map[string]bool)
+		for _, pkg := range pkgs {
+			// Remove otel.runtime.go from the package directory (where it was created)
+			pkgDir := util.GetPackageDir(pkg)
+			if pkgDir == "" && pkg.Module != nil {
+				pkgDir = pkg.Module.Dir
+			}
+			if pkgDir != "" && !removedDirs[pkgDir] {
+				removedDirs[pkgDir] = true
+				if err = os.RemoveAll(filepath.Join(pkgDir, OtelRuntimeFile)); err != nil {
+					logger.DebugContext(ctx, "failed to remove otel.runtime.go", "path", pkgDir, "error", err)
+				}
+			}
+		}
+		if err = os.RemoveAll(unzippedPkgDir); err != nil {
 			logger.DebugContext(ctx, "failed to remove unzipped pkg", "error", err)
 		}
-		err = util.RestoreFile(backupFiles)
-		if err != nil {
+		if err = util.RestoreFile(backupFiles); err != nil {
 			logger.DebugContext(ctx, "failed to restore files", "error", err)
 		}
 	}()
