@@ -47,6 +47,26 @@ func IsClient(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindClient }
 // IsServer matches server spans.
 func IsServer(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindServer }
 
+// IsProducer matches producer spans (messaging publish).
+func IsProducer(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindProducer }
+
+// IsConsumer matches consumer spans (messaging receive/process).
+func IsConsumer(s ptrace.Span) bool { return s.Kind() == ptrace.SpanKindConsumer }
+
+// HasSpanName matches spans with the given name.
+func HasSpanName(name string) SpanMatcher {
+	return func(s ptrace.Span) bool {
+		return s.Name() == name
+	}
+}
+
+// HasStatusCode matches spans with the given status code.
+func HasStatusCode(code ptrace.StatusCode) SpanMatcher {
+	return func(s ptrace.Span) bool {
+		return s.Status().Code() == code
+	}
+}
+
 // HasAttribute matches spans with an exact attribute value.
 func HasAttribute(key string, value any) SpanMatcher {
 	return func(s ptrace.Span) bool {
