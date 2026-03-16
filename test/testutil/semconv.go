@@ -130,3 +130,17 @@ func RequireRedisClientSemconv(
 		}
 	}
 }
+
+// RequireMessagingSemconv verifies that a messaging span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/
+func RequireMessagingSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	messagingSystem,
+	destinationName,
+	operationType string,
+) {
+	RequireAttribute(t, span, string(semconv.MessagingSystemKey), messagingSystem)
+	RequireAttribute(t, span, string(semconv.MessagingDestinationNameKey), destinationName)
+	RequireAttribute(t, span, string(semconv.MessagingOperationTypeKey), operationType)
+}
