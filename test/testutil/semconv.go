@@ -12,6 +12,15 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 )
 
+// DBClientSemconvOptions holds system-specific attributes that extend the
+// generic database-spans semconv assertions in RequireDBClientSemconv.
+type DBClientSemconvOptions struct {
+	// DBSystem asserts db.system.name when non-empty (e.g. "clickhouse", "redis").
+	DBSystem string
+	// NetworkTransport asserts network.transport when non-empty (e.g. "tcp").
+	NetworkTransport string
+}
+
 // RequireHTTPClientSemconv verifies that an HTTP client span follows semantic conventions.
 // Reference: https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client-span
 func RequireHTTPClientSemconv(
@@ -76,12 +85,16 @@ func RequireGRPCClientSemconv(
 
 // RequireDBClientSemconv verifies that a database client span follows semantic conventions.
 // Reference: https://opentelemetry.io/docs/specs/semconv/database/database-spans/
+//
+// An optional DBClientSemconvOptions value may be provided to additionally assert
+// system-specific attributes such as db.system.name and network.transport.
 func RequireDBClientSemconv(
 	t *testing.T,
 	span ptrace.Span,
 	dbOperationName, dbQueryText, serverAddress string,
 	serverPort int64,
 	dbNamespace string,
+	opts ...DBClientSemconvOptions,
 ) {
 	// Required attributes
 	RequireAttribute(t, span, string(semconv.DBOperationNameKey), dbOperationName)
@@ -92,6 +105,30 @@ func RequireDBClientSemconv(
 		RequireAttribute(t, span, string(semconv.ServerPortKey), serverPort)
 	}
 	RequireAttribute(t, span, string(semconv.DBNamespaceKey), dbNamespace)
+	// System-specific optional attributes
+	if len(opts) > 0 {
+		if opts[0].DBSystem != "" {
+			RequireAttribute(t, span, string(semconv.DBSystemNameKey), opts[0].DBSystem)
+		}
+		if opts[0].NetworkTransport != "" {
+			RequireAttribute(t, span, string(semconv.NetworkTransportKey), opts[0].NetworkTransport)
+		}
+	}
+}
+
+// RequireClickHouseClientSemconv verifies that a ClickHouse client span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/database/database-spans/
+func RequireClickHouseClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	operationName, queryText, serverAddress string,
+	serverPort int64,
+	dbNamespace string,
+) {
+	t.Helper()
+	RequireDBClientSemconv(t, span, operationName, queryText, serverAddress, serverPort, dbNamespace,
+		DBClientSemconvOptions{DBSystem: "clickhouse", NetworkTransport: "tcp"},
+	)
 }
 
 // RequireGRPCServerSemconv verifies that a gRPC server span follows semantic conventions.
@@ -118,15 +155,14 @@ func RequireRedisClientSemconv(
 		host = endpoint
 	}
 
-	RequireAttribute(t, span, string(semconv.DBSystemNameKey), "redis")
-	RequireAttribute(t, span, string(semconv.DBOperationNameKey), operationName)
-	RequireAttribute(t, span, string(semconv.ServerAddressKey), host)
-	RequireAttribute(t, span, string(semconv.NetworkTransportKey), "tcp")
-	RequireAttribute(t, span, string(semconv.DBQueryTextKey), queryText)
-
+	var serverPort int64
 	if err == nil {
 		if port, convErr := strconv.Atoi(portStr); convErr == nil && port > 0 {
-			RequireAttribute(t, span, string(semconv.ServerPortKey), int64(port))
+			serverPort = int64(port)
 		}
 	}
+
+	RequireDBClientSemconv(t, span, operationName, queryText, host, serverPort, "",
+		DBClientSemconvOptions{DBSystem: "redis", NetworkTransport: "tcp"},
+	)
 }
