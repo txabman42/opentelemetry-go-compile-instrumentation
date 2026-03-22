@@ -39,11 +39,11 @@ ictx := insttest.NewMockHookContext(param0, param1)
 
 Create `test/integration/<name>_test.go` with `//go:build integration`.
 
-**Read loongsuite test scenarios first** — `loongsuite-go-agent/test/<name>_tests.go` lists all scenarios (basic, HTTP/2, HTTPS, metrics, etc.) and `loongsuite-go-agent/test/<name>/test_*.go` shows the exact attributes asserted for each. Each registered `NewGeneralTestCase` should map to a `t.Run` sub-test here. The `verifier.Verify*Attributes` calls in the loongsuite test apps are the ground truth for which semconv attributes are expected per scenario.
+**Read loongsuite test scenarios first** — `loongsuite-go-agent/test/<name>_tests.go` lists all scenarios (basic, HTTP/2, HTTPS, metrics, etc.) and `loongsuite-go-agent/test/<name>/<version>/test_*.go` shows the exact attributes asserted for each. Each registered `NewGeneralTestCase` should map to a `t.Run` sub-test here. The `verifier.Verify*Attributes` calls in the loongsuite test apps are the ground truth for which semconv attributes are expected per scenario.
 
 Read an existing test for style: `test/integration/redis_client_test.go` (simple) or `test/integration/db_client_test.go` (Complex-DB).
 
-**Pattern:**
+**Single-version pattern:**
 ```go
 func Test<Name>(t *testing.T) {
     f := testutil.NewTestFixture(t)
@@ -52,6 +52,22 @@ func Test<Name>(t *testing.T) {
     span := f.RequireSingleSpan()
     testutil.RequireAttribute(t, span, "attr.key", expectedValue)
     // or use a Require*Semconv helper
+}
+```
+
+**Multi-version pattern** (when loongsuite has multiple version subdirectories):
+```go
+func Test<Name>(t *testing.T) {
+    versions := []string{"v2.13.0", "v2.42.0"}
+    for _, ver := range versions {
+        t.Run(ver, func(t *testing.T) {
+            f := testutil.NewTestFixture(t)
+            dep := startInProcessDependency(t)
+            f.BuildAndRun("<name>/"+ver, "-addr="+dep.Addr())
+            span := f.RequireSingleSpan()
+            testutil.RequireAttribute(t, span, "attr.key", expectedValue)
+        })
+    }
 }
 ```
 
@@ -87,5 +103,7 @@ make lint/go                                  # linter — no suppressions
 - **Wrong param index**: for methods, index 0 is the receiver; double-check against the target function signature
 - **initOnce not resettable in tests**: declare `var initOnce sync.Once` at package level (not inside a function)
 - **Semconv version**: use `go.opentelemetry.io/otel/semconv/v1.37.0`; check `.semconv-version` file
-- **Test app location**: `TestFixture` resolves apps from `test/apps/<name>/`; directory name must match `BuildAndRun()` argument
+- **Test app location**: `TestFixture` resolves apps from `test/apps/<name>/`; directory name must match `BuildAndRun()` argument. For multi-version apps, use path-like names: `f.BuildAndRun("<name>/<version>")` resolves to `test/apps/<name>/<version>/`
+- **Multi-version: only one version migrated**: always check `loongsuite-go-agent/test/<name>/` for ALL version subdirectories in Step 0. Create a test app and integration sub-test for EACH version, not just the first or minimum
+- **Multi-version: `make tidy/test-apps`**: uses `find test/apps -name "go.mod"` so nested version directories are auto-discovered — no Makefile changes needed
 - **Struct-injection modules excluded from make test-unit/pkg**: if your instrumentation uses struct injection, `go test -C pkg/instrumentation/<name> ./...` directly instead of relying on the make target

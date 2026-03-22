@@ -22,7 +22,9 @@ Both repositories must be available in the workspace. Loongsuite is read-only (s
 - JSON rule(s): `loongsuite-go-agent/tool/data/rules/*.json` — search for entries where `Path` contains `<name>` or `ImportPath` matches the target library
 - Hook code: all `.go` files under `loongsuite-go-agent/pkg/rules/<name>/`
 
-**3. Classify the tier** by reading the hook code:
+**3. Detect multi-version support.** List subdirectories of `loongsuite-go-agent/test/<name>/`. If it contains version subdirectories (e.g. `v2.13.0/`, `v2.42.0/`), record ALL of them as the **version list**. Many loongsuite rules test against multiple library versions — all must be migrated. Read the `go.mod` in each version subdirectory to identify the pinned library version. If there is only one version subdirectory or no subdirectories (flat layout), record a single version.
+
+**4. Classify the tier** by reading the hook code:
 
 | Signal in hook code | Tier |
 |---------------------|------|
@@ -95,7 +97,9 @@ Read [reference/tier-examples.md](reference/tier-examples.md) for annotated befo
 Before writing any tests, read the loongsuite test files to discover what scenarios were considered important:
 
 1. **`loongsuite-go-agent/test/<name>_tests.go`** — lists every test case registered via `NewGeneralTestCase`. The number and names of cases tell you how many distinct scenarios exist (e.g. for nethttp: basic, HTTP/2, HTTPS, metrics).
-2. **`loongsuite-go-agent/test/<name>/test_*.go`** — each file is one scenario. Read the `verifier.Verify*Attributes` calls to see exactly which semconv attributes were validated and which parent-child span relationships were asserted.
+2. **`loongsuite-go-agent/test/<name>/<version>/test_*.go`** — each file is one scenario. Read the `verifier.Verify*Attributes` calls to see exactly which semconv attributes were validated and which parent-child span relationships were asserted.
+
+**Multi-version rules:** If Step 0 identified multiple versions, read the test files from **every** version subdirectory (e.g. `test/<name>/v2.13.0/test_*.go` AND `test/<name>/v2.42.0/test_*.go`). Compare them — often the test code is identical or nearly identical across versions, but sometimes newer versions add scenarios or change APIs. Note any differences; each version needs its own test app in Step 6.
 
 Use these scenarios as the **test coverage target** for both unit and integration tests. Do not limit yourself to a single happy-path test if loongsuite validated multiple distinct protocol or transport variants.
 
@@ -109,9 +113,29 @@ Use `insttest.NewMockHookContext(...)` from `pkg/inst/insttest` and `tracetest.S
 
 ## Step 6: Test App
 
-Create `test/apps/<name>/main.go` — standalone Go module (`go.mod` + `go.sum`). It must accept flags (`-addr`, `-op`, `-scheme`, etc.) and perform the operations identified in Step 4. Run `make tidy/test-apps` after.
+**Single-version rules:** Create `test/apps/<name>/main.go` — standalone Go module (`go.mod` + `go.sum`). It must accept flags (`-addr`, `-op`, `-scheme`, etc.) and perform the operations identified in Step 4.
 
-Look at `test/apps/redisclient/` or `test/apps/dbclient/` as style references.
+**Multi-version rules:** Create one subdirectory per version under `test/apps/<name>/`:
+
+```
+test/apps/<name>/
+├── <version-a>/       # e.g. v2.13.0
+│   ├── go.mod         # pins <library> <version-a>
+│   ├── go.sum
+│   └── main.go
+└── <version-b>/       # e.g. v2.42.0
+    ├── go.mod         # pins <library> <version-b>
+    ├── go.sum
+    └── main.go
+```
+
+Each version subdirectory is a standalone Go module. The `go.mod` in each pins the corresponding library version (read from the loongsuite `test/<name>/<version>/go.mod`). The `main.go` is adapted from the corresponding loongsuite `test/<name>/<version>/test_*.go`. Often `main.go` is identical across versions — if so, write it once and copy, adjusting only if the API changed between versions.
+
+The `TestFixture.resolveAppPath` already supports path-like names via `filepath.Join`, so `f.BuildAndRun("<name>/<version>")` resolves to `test/apps/<name>/<version>/`. The `make tidy/test-apps` target uses `find test/apps -name "go.mod"` which automatically discovers nested modules.
+
+Run `make tidy/test-apps` after creating all version directories.
+
+Look at `test/apps/redisclient/` or `test/apps/dbclient/` as style references for the `main.go` content.
 
 ## Step 7: Integration Test
 
@@ -120,6 +144,24 @@ Create `test/integration/<name>_test.go` with `//go:build integration`.
 Read an existing test for the full pattern: `test/integration/redis_client_test.go` (simple) or `test/integration/db_client_test.go` (Complex-DB). Use `testutil.NewTestFixture`, `f.BuildAndRun`, and `testutil.Require*Semconv` helpers. Add a new `RequireXxxSemconv` helper in `test/testutil/semconv.go` if no existing one fits.
 
 Write one sub-test (`t.Run`) per scenario identified in Step 4. For example, if loongsuite tests HTTP/1.1, HTTP/2, and HTTPS, add three sub-tests. The loongsuite `verifier.Verify*Attributes` calls tell you exactly which attributes to assert in each scenario.
+
+**Multi-version rules:** Wrap all scenario sub-tests in a per-version `t.Run` block. Use the path-like app name to target each version's test app:
+
+```go
+func TestClickhouse(t *testing.T) {
+    versions := []string{"v2.13.0", "v2.42.0"}
+    for _, ver := range versions {
+        t.Run(ver, func(t *testing.T) {
+            f := testutil.NewTestFixture(t)
+            dep := startClickhouse(t)
+            f.BuildAndRun("clickhousev2/"+ver, "-addr="+dep.Addr())
+            // assert spans...
+        })
+    }
+}
+```
+
+This ensures every library version covered by loongsuite is validated in the otel repo. The `resolveAppPath` in `TestFixture` supports path-like names (`"<name>/<version>"` resolves to `test/apps/<name>/<version>/`).
 
 For Messaging: write an E2E test (`test/e2e/<name>_test.go`) if context propagation across producer/consumer must be validated.
 
@@ -141,4 +183,6 @@ make lint/go                                  # no lint suppression allowed
 - [ ] Every hook function exported and named in YAML `before`/`after`
 - [ ] Every hook has ≥1 unit test asserting span attributes
 - [ ] Integration test asserts semconv attributes
+- [ ] Multi-version: test app exists under `test/apps/<name>/<version>/` for EVERY version from Step 0
+- [ ] Multi-version: integration test has a `t.Run` sub-test for EVERY version
 - [ ] `make all` passes clean
