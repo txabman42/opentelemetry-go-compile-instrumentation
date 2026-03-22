@@ -22,7 +22,7 @@ INST_PKG_TMP = pkg_temp
 API_SYNC_SOURCE = pkg/inst/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
-GO_VERSION = 1.24
+GO_VERSION = 1.25
 
 ##@ Tooling
 
@@ -426,8 +426,8 @@ test-e2e/coverage: build build-demo $(GOTESTFMT)
 
 .PHONY: crosslink
 crosslink: $(CROSSLINK) ## Update intra-repository dependencies in all go modules
-	@# Clean .otel-build directories before generating go.work to avoid parsing generated go.mod
-	@find . -type d -name ".otel-build" -exec rm -rf {} + 2>/dev/null || true
+	@# Clean .otelc-build directories before running to avoid parsing generated go.mod files
+	@find . -type d -name ".otelc-build" -exec rm -rf {} + 2>/dev/null || true
 	@echo "Updating intra-repository dependencies in all go modules" \
 		&& $(CROSSLINK) --root=$(CURDIR)
 
