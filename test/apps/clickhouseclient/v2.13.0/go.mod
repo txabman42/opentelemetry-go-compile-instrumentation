@@ -1,4 +1,4 @@
-module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/clickhouseclient
+module github.com/open-telemetry/opentelemetry-go-compile-instrumentation/test/apps/clickhouseclient/v2.13.0
 
 go 1.25.0
 
