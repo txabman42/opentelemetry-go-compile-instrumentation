@@ -1,0 +1,15 @@
+next_hook:
+  target: "github.com/gin-gonic/gin"
+  version: v1.7.0,v1.10.2
+  func: "Next"
+  recv: "*Context"
+  before: "BeforeNext"
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/gin"
+
+html_hook:
+  target: "github.com/gin-gonic/gin"
+  version: v1.7.0,v1.10.2
+  func: "HTML"
+  recv: "*Context"
+  before: "BeforeHTML"
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/gin"
