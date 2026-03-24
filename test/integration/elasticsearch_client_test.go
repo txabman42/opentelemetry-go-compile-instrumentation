@@ -33,7 +33,7 @@ func startElasticsearchContainer(t *testing.T) string {
 		Env: map[string]string{
 			"discovery.type":         "single-node",
 			"xpack.security.enabled": "false",
-			"ES_JAVA_OPTS":            "-Xms512m -Xmx512m",
+			"ES_JAVA_OPTS":           "-Xms512m -Xmx512m",
 		},
 		WaitingFor: wait.ForHTTP("/_cluster/health").
 			WithPort("9200/tcp").
@@ -56,6 +56,8 @@ func startElasticsearchContainer(t *testing.T) string {
 }
 
 func TestElasticsearchClient(t *testing.T) {
+	testcontainers.SkipIfProviderIsNotHealthy(t)
+
 	versions := []struct {
 		name string
 		app  string
@@ -76,7 +78,6 @@ func TestElasticsearchClient(t *testing.T) {
 
 			serverAddress := parseElasticsearchHost(addr)
 
-			// create index span: operation = "put" (PUT /my_index)
 			createSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsClient,
 				testutil.HasAttribute("db.operation.name", "put"),
@@ -84,7 +85,6 @@ func TestElasticsearchClient(t *testing.T) {
 			testutil.RequireElasticsearchClientSemconv(t, createSpan,
 				"put", "/my_index", serverAddress)
 
-			// search span: operation = "_search"
 			searchSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsClient,
 				testutil.HasAttribute("db.operation.name", "_search"),
@@ -92,7 +92,6 @@ func TestElasticsearchClient(t *testing.T) {
 			testutil.RequireElasticsearchClientSemconv(t, searchSpan,
 				"_search", "/my_index/_search", serverAddress)
 
-			// delete index span: operation = "delete" (DELETE /my_index)
 			deleteSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsClient,
 				testutil.HasAttribute("db.operation.name", "delete"),
@@ -103,15 +102,13 @@ func TestElasticsearchClient(t *testing.T) {
 	}
 }
 
-// parseElasticsearchHost extracts the host (without port) from a base URL like
-// "http://localhost:9200".
+// parseElasticsearchHost extracts the host (without port) from a URL like
+// "http://127.0.0.1:9200".
 func parseElasticsearchHost(baseURL string) string {
-	// strip scheme
 	s := baseURL
 	if len(s) > 7 && s[:7] == "http://" {
 		s = s[7:]
 	}
-	// host:port → host
 	for i, c := range s {
 		if c == ':' {
 			return s[:i]

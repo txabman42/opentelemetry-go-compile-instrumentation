@@ -73,7 +73,7 @@ func BeforePerform(ictx inst.HookContext, client *elasticsearch.BaseClient, requ
 	if client != nil {
 		if t, ok := client.Transport.(*elastictransport.Client); ok {
 			for _, u := range t.URLs() {
-				addresses = append(addresses, u.Host)
+				addresses = append(addresses, u.Hostname())
 			}
 		}
 	}

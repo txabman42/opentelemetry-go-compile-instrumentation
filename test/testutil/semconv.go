@@ -114,9 +114,8 @@ func RequireElasticsearchClientSemconv(
 	operationName, queryText, serverAddress string,
 ) {
 	t.Helper()
-	RequireDBClientSemconv(t, span, operationName, queryText, serverAddress, 0, "",
-		DBClientSemconvOptions{DBSystem: "elasticsearch"},
-	)
+	RequireAttribute(t, span, string(semconv.DBSystemNameKey), "elasticsearch")
+	RequireDBClientSemconv(t, span, operationName, queryText, serverAddress, 0, "")
 }
 
 // RequireRedisClientSemconv verifies that a Redis client span follows semantic conventions.
