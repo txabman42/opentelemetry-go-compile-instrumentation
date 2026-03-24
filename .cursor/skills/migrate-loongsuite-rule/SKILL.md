@@ -141,9 +141,24 @@ Look at `test/apps/redisclient/` or `test/apps/dbclient/` as style references fo
 
 Create `test/integration/<name>_test.go` with `//go:build integration`.
 
+**Docker-based tests (testcontainers):** Integration tests run in CI on **macOS, Windows, and Ubuntu** (see `.github/workflows/test-integration.yaml`). Only Ubuntu runners have Docker. When a test requires Docker (e.g. Elasticsearch, Kafka, ClickHouse), use `testcontainers-go` with `testcontainers.SkipIfProviderIsNotHealthy(t)` as the first line in the test function. This gracefully skips the test on runners without Docker instead of panicking.
+
+```go
+func TestElasticsearch(t *testing.T) {
+    testcontainers.SkipIfProviderIsNotHealthy(t)  // skips on macOS/Windows, runs on Ubuntu
+    // ... testcontainers setup ...
+}
+```
+
+For services that have lightweight in-process alternatives, prefer those (e.g. `miniredis` for Redis, `httptest.Server` for simple HTTP, fake SQL drivers for `database/sql`).
+
 Read an existing test for the full pattern: `test/integration/redis_client_test.go` (simple) or `test/integration/db_client_test.go` (Complex-DB). Use `testutil.NewTestFixture`, `f.BuildAndRun`, and `testutil.Require*Semconv` helpers. Add a new `RequireXxxSemconv` helper in `test/testutil/semconv.go` if no existing one fits.
 
+**CRITICAL — test module API divergence:** The `test/testutil/semconv.go` helpers have DIFFERENT signatures from the identically-named file under `pkg/instrumentation/`. In particular, `RequireDBClientSemconv` in the `test` module does NOT accept a variadic `opts ...DBClientSemconvOptions` parameter. Always **read `test/testutil/semconv.go`** before writing a new `Require*Semconv` helper to match its actual API. When adding a system-specific helper (e.g. `RequireElasticsearchClientSemconv`), assert `db.system.name` directly via `RequireAttribute` instead of relying on options structs that don't exist in the test module.
+
 Write one sub-test (`t.Run`) per scenario identified in Step 4. For example, if loongsuite tests HTTP/1.1, HTTP/2, and HTTPS, add three sub-tests. The loongsuite `verifier.Verify*Attributes` calls tell you exactly which attributes to assert in each scenario.
+
+**Hook coverage rule:** Every hook function declared in the YAML (`before`/`after`) must be exercised by at least one integration sub-test. A hook is only exercised if the test app actually calls the hooked method — for example, `BeforeHTML` is only triggered when the handler calls `c.HTML()`, not `c.String()` or `c.JSON()`. Check the hooked function names and ensure the test app has a route that calls each one directly. Use `engine.SetHTMLTemplate(template.Must(...))` to register inline templates if file templates would add unnecessary complexity.
 
 **Multi-version rules:** Wrap all scenario sub-tests in a per-version `t.Run` block. Use the path-like app name to target each version's test app:
 
@@ -179,11 +194,22 @@ make lint/go                                  # no lint suppression allowed
 
 > `make test-integration` already depends on `make build` and `make build-demo` — do not run `make build` separately first.
 
+<<<<<<< Updated upstream
+=======
+> **`make test-integration` is a BLOCKING gate.** Do NOT mark the migration as complete if it fails. Read the failure output carefully. Fix the hook code and re-run until all tests pass.
+
+>>>>>>> Stashed changes
 **Final checklist:**
 - [ ] Apache 2.0 header on every `.go` file
 - [ ] Every hook function exported and named in YAML `before`/`after`
 - [ ] Every hook has ≥1 unit test asserting span attributes
+<<<<<<< Updated upstream
 - [ ] Integration test asserts semconv attributes
+=======
+- [ ] Every hook declared in YAML has ≥1 integration test sub-case that exercises it directly (e.g. a route using `c.HTML()` to trigger `BeforeHTML`, not just routes using `c.String()`/`c.JSON()`)
+- [ ] Integration test asserts semconv attributes
+- [ ] `make test-integration` passes (all tests green)
+>>>>>>> Stashed changes
 - [ ] Multi-version: test app exists under `test/apps/<name>/<version>/` for EVERY version from Step 0
 - [ ] Multi-version: integration test has a `t.Run` sub-test for EVERY version
 - [ ] `make all` passes clean

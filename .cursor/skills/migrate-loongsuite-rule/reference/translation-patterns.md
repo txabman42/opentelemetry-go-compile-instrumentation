@@ -166,6 +166,10 @@ attrs := []attribute.KeyValue{
 
 Use `go.opentelemetry.io/otel/semconv/v1.37.0` (check `.semconv-version` file).
 
+**Do NOT blindly copy loongsuite's empty return values.** Loongsuite `AttrsGetter` methods that return `""` or `0` (e.g. `GetDbNamespace()`, `GetCollection()`, `GetBatchSize()`) often indicate a gap in loongsuite's implementation, NOT that the attribute is absent. For each empty return value, check the [OTel Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/) for that signal and determine if the data is actually derivable from the request. If it is, implement it. Example: `GetDbNamespace()` returning `""` for Elasticsearch — the index name is in the URL path (`parts[0]`) and maps directly to `db.namespace`.
+
+**`server.address` vs `server.port` — Go `url.Host` trap:** Per [OTel semconv](https://opentelemetry.io/docs/specs/semconv/general/attributes/#server-attributes), `server.address` must be the hostname/IP WITHOUT the port. In Go, `url.URL.Host` includes the port (e.g. `localhost:9200`). Always use `url.URL.Hostname()` (strips port) for `semconv.ServerAddressKey`. If you need the port, use `url.URL.Port()` and convert to int for `semconv.ServerPortKey`.
+
 ## 7. GLS: LocalRootSpanFromGLS → runtime package
 
 ```go
