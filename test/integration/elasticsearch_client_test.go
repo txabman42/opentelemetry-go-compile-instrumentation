@@ -83,21 +83,21 @@ func TestElasticsearchClient(t *testing.T) {
 				testutil.HasAttribute("db.operation.name", "put"),
 			)
 			testutil.RequireElasticsearchClientSemconv(t, createSpan,
-				"put", "/my_index", serverAddress)
+				"put", "/my_index", serverAddress, "my_index")
 
 			searchSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsClient,
 				testutil.HasAttribute("db.operation.name", "_search"),
 			)
 			testutil.RequireElasticsearchClientSemconv(t, searchSpan,
-				"_search", "/my_index/_search", serverAddress)
+				"_search", "/my_index/_search", serverAddress, "my_index")
 
 			deleteSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsClient,
 				testutil.HasAttribute("db.operation.name", "delete"),
 			)
 			testutil.RequireElasticsearchClientSemconv(t, deleteSpan,
-				"delete", "/my_index", serverAddress)
+				"delete", "/my_index", serverAddress, "my_index")
 		})
 	}
 }
