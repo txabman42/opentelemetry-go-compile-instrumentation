@@ -106,6 +106,19 @@ func RequireGRPCServerSemconv(t *testing.T, span ptrace.Span, rpcService, rpcMet
 	RequireAttribute(t, span, string(semconv.RPCGRPCStatusCodeKey), grpcStatusCode)
 }
 
+// RequireElasticsearchClientSemconv verifies that an Elasticsearch client span follows semantic conventions.
+// Reference: https://opentelemetry.io/docs/specs/semconv/database/elasticsearch/
+func RequireElasticsearchClientSemconv(
+	t *testing.T,
+	span ptrace.Span,
+	operationName, queryText, serverAddress string,
+) {
+	t.Helper()
+	RequireDBClientSemconv(t, span, operationName, queryText, serverAddress, 0, "",
+		DBClientSemconvOptions{DBSystem: "elasticsearch"},
+	)
+}
+
 // RequireRedisClientSemconv verifies that a Redis client span follows semantic conventions.
 // Reference: https://opentelemetry.io/docs/specs/semconv/database/redis/
 func RequireRedisClientSemconv(
