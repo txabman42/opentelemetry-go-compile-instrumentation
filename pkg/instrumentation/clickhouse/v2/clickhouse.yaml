@@ -1,0 +1,7 @@
+hook_open:
+  target: github.com/ClickHouse/clickhouse-go/v2
+  func: Open
+  version: v2.13.0
+  before: BeforeOpen
+  after: AfterOpen
+  path: "github.com/open-telemetry/opentelemetry-go-compile-instrumentation/pkg/instrumentation/clickhouse/v2"
