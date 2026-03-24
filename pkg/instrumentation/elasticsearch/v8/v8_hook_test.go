@@ -37,62 +37,78 @@ func newHTTPRequest(t *testing.T, method, urlStr string) *http.Request {
 	return req
 }
 
-func TestGetEsOpAndPath(t *testing.T) {
+func TestParseEsRequest(t *testing.T) {
 	tests := []struct {
-		name       string
-		method     string
-		url        string
-		wantOp     string
-		wantPath   string
+		name          string
+		method        string
+		url           string
+		wantOp        string
+		wantPath      string
+		wantNamespace string
 	}{
 		{
-			name:     "index create",
-			method:   "PUT",
-			url:      "http://localhost:9200/my_index",
-			wantOp:   "put",
-			wantPath: "/my_index",
+			name:          "index create",
+			method:        "PUT",
+			url:           "http://localhost:9200/my_index",
+			wantOp:        "put",
+			wantPath:      "/my_index",
+			wantNamespace: "my_index",
 		},
 		{
-			name:     "index delete",
-			method:   "DELETE",
-			url:      "http://localhost:9200/my_index",
-			wantOp:   "delete",
-			wantPath: "/my_index",
+			name:          "index delete",
+			method:        "DELETE",
+			url:           "http://localhost:9200/my_index",
+			wantOp:        "delete",
+			wantPath:      "/my_index",
+			wantNamespace: "my_index",
 		},
 		{
-			name:     "doc index",
-			method:   "POST",
-			url:      "http://localhost:9200/my_index/_doc",
-			wantOp:   "_doc",
-			wantPath: "/my_index/_doc",
+			name:          "doc index",
+			method:        "POST",
+			url:           "http://localhost:9200/my_index/_doc",
+			wantOp:        "_doc",
+			wantPath:      "/my_index/_doc",
+			wantNamespace: "my_index",
 		},
 		{
-			name:     "doc get",
-			method:   "GET",
-			url:      "http://localhost:9200/my_index/_doc/id",
-			wantOp:   "_doc",
-			wantPath: "/my_index/_doc/id",
+			name:          "doc get",
+			method:        "GET",
+			url:           "http://localhost:9200/my_index/_doc/id",
+			wantOp:        "_doc",
+			wantPath:      "/my_index/_doc/id",
+			wantNamespace: "my_index",
 		},
 		{
-			name:     "search",
-			method:   "GET",
-			url:      "http://localhost:9200/my_index/_search",
-			wantOp:   "_search",
-			wantPath: "/my_index/_search",
+			name:          "search",
+			method:        "GET",
+			url:           "http://localhost:9200/my_index/_search",
+			wantOp:        "_search",
+			wantPath:      "/my_index/_search",
+			wantNamespace: "my_index",
 		},
 		{
-			name:     "update",
-			method:   "POST",
-			url:      "http://localhost:9200/my_index/_update/id",
-			wantOp:   "_update",
-			wantPath: "/my_index/_update/id",
+			name:          "update",
+			method:        "POST",
+			url:           "http://localhost:9200/my_index/_update/id",
+			wantOp:        "_update",
+			wantPath:      "/my_index/_update/id",
+			wantNamespace: "my_index",
 		},
 		{
-			name:     "nil request",
-			method:   "",
-			url:      "",
-			wantOp:   "UNKNOWN",
-			wantPath: "",
+			name:          "cluster health (no index)",
+			method:        "GET",
+			url:           "http://localhost:9200/_cluster/health",
+			wantOp:        "health",
+			wantPath:      "/_cluster/health",
+			wantNamespace: "",
+		},
+		{
+			name:          "nil request",
+			method:        "",
+			url:           "",
+			wantOp:        "UNKNOWN",
+			wantPath:      "",
+			wantNamespace: "",
 		},
 	}
 
@@ -102,9 +118,10 @@ func TestGetEsOpAndPath(t *testing.T) {
 			if tt.url != "" {
 				req = newHTTPRequest(t, tt.method, tt.url)
 			}
-			op, path := getEsOpAndPath(req)
+			op, path, namespace := parseEsRequest(req)
 			assert.Equal(t, tt.wantOp, op)
 			assert.Equal(t, tt.wantPath, path)
+			assert.Equal(t, tt.wantNamespace, namespace)
 		})
 	}
 }
@@ -153,6 +170,7 @@ func TestBeforeAndAfterPerform_CreatesSpan(t *testing.T) {
 	assert.Equal(t, "elasticsearch", attrMap["db.system.name"])
 	assert.Equal(t, "_search", attrMap["db.operation.name"])
 	assert.Equal(t, "/my_index/_search", attrMap["db.query.text"])
+	assert.Equal(t, "my_index", attrMap["db.namespace"])
 }
 
 func TestAfterPerform_RecordsError(t *testing.T) {

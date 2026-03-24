@@ -91,7 +91,9 @@ func RequireDBClientSemconv(
 	if serverPort > 0 {
 		RequireAttribute(t, span, string(semconv.ServerPortKey), serverPort)
 	}
-	RequireAttribute(t, span, string(semconv.DBNamespaceKey), dbNamespace)
+	if dbNamespace != "" {
+		RequireAttribute(t, span, string(semconv.DBNamespaceKey), dbNamespace)
+	}
 }
 
 // RequireGRPCServerSemconv verifies that a gRPC server span follows semantic conventions.
@@ -111,11 +113,11 @@ func RequireGRPCServerSemconv(t *testing.T, span ptrace.Span, rpcService, rpcMet
 func RequireElasticsearchClientSemconv(
 	t *testing.T,
 	span ptrace.Span,
-	operationName, queryText, serverAddress string,
+	operationName, queryText, serverAddress, namespace string,
 ) {
 	t.Helper()
 	RequireAttribute(t, span, string(semconv.DBSystemNameKey), "elasticsearch")
-	RequireDBClientSemconv(t, span, operationName, queryText, serverAddress, 0, "")
+	RequireDBClientSemconv(t, span, operationName, queryText, serverAddress, 0, namespace)
 }
 
 // RequireRedisClientSemconv verifies that a Redis client span follows semantic conventions.

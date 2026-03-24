@@ -34,6 +34,12 @@ func startElasticsearchContainer(t *testing.T) string {
 			"discovery.type":         "single-node",
 			"xpack.security.enabled": "false",
 			"ES_JAVA_OPTS":           "-Xms512m -Xmx512m",
+			// Required on Linux CI runners:
+			// - memory_lock: avoids needing CAP_IPC_LOCK (not available in containers)
+			// - disk threshold: CI runners have limited disk; disable to prevent shutdown
+			// NOTE: bootstrap.system_call_filter does NOT exist in ES 8.x — do not add it
+			"bootstrap.memory_lock":                             "false",
+			"cluster.routing.allocation.disk.threshold_enabled": "false",
 		},
 		WaitingFor: wait.ForHTTP("/_cluster/health").
 			WithPort("9200/tcp").
@@ -83,21 +89,21 @@ func TestElasticsearchClient(t *testing.T) {
 				testutil.HasAttribute("db.operation.name", "put"),
 			)
 			testutil.RequireElasticsearchClientSemconv(t, createSpan,
-				"put", "/my_index", serverAddress)
+				"put", "/my_index", serverAddress, "my_index")
 
 			searchSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsClient,
 				testutil.HasAttribute("db.operation.name", "_search"),
 			)
 			testutil.RequireElasticsearchClientSemconv(t, searchSpan,
-				"_search", "/my_index/_search", serverAddress)
+				"_search", "/my_index/_search", serverAddress, "my_index")
 
 			deleteSpan := testutil.RequireSpan(t, f.Traces(),
 				testutil.IsClient,
 				testutil.HasAttribute("db.operation.name", "delete"),
 			)
 			testutil.RequireElasticsearchClientSemconv(t, deleteSpan,
-				"delete", "/my_index", serverAddress)
+				"delete", "/my_index", serverAddress, "my_index")
 		})
 	}
 }

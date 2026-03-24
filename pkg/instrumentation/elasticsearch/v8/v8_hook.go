@@ -79,12 +79,15 @@ func BeforePerform(ictx inst.HookContext, client *elasticsearch.BaseClient, requ
 	}
 	serverAddress := strings.Join(addresses, ",")
 
-	op, urlPath := getEsOpAndPath(request)
+	op, urlPath, indexName := parseEsRequest(request)
 	attrs := []attribute.KeyValue{
 		semconv.DBSystemNameKey.String("elasticsearch"),
 		semconv.DBOperationNameKey.String(op),
 		semconv.DBQueryTextKey.String(urlPath),
 		semconv.ServerAddressKey.String(serverAddress),
+	}
+	if indexName != "" {
+		attrs = append(attrs, semconv.DBNamespaceKey.String(indexName))
 	}
 
 	parentCtx := request.Context()
@@ -109,24 +112,39 @@ func AfterPerform(ictx inst.HookContext, response *http.Response, err error) {
 	}
 }
 
-// getEsOpAndPath extracts the operation name and URL path from an HTTP request.
-// The operation is derived from the first path segment after the index name when
-// a sub-resource is present (e.g. _doc, _search, _update), or falls back to the
-// lower-cased HTTP method for top-level index operations.
-func getEsOpAndPath(req *http.Request) (op string, urlPath string) {
+// parseEsRequest extracts the operation name, URL path, and index name from an
+// HTTP request to Elasticsearch. The URL structure is:
+//
+//	/<index>/<sub-resource>/<id>
+//
+// The operation is the sub-resource segment (e.g. _doc, _search, _update) when
+// present, or the lower-cased HTTP method for top-level index operations (e.g.
+// PUT /my_index, DELETE /my_index). The index name is returned as the namespace;
+// it is empty for cluster-level endpoints (e.g. /_cluster/health).
+func parseEsRequest(req *http.Request) (op, urlPath, indexName string) {
 	if req == nil || req.URL == nil {
-		return "UNKNOWN", ""
+		return "UNKNOWN", "", ""
 	}
 	urlPath = req.URL.Path
 	parts := strings.Split(strings.TrimPrefix(urlPath, "/"), "/")
-	// parts[0] = index name (or empty), parts[1] = sub-resource or operation
+	// parts[0] = index name (or system endpoint starting with _), parts[1] = sub-resource
 	switch len(parts) {
-	case 0, 1:
-		return strings.ToLower(req.Method), urlPath
-	default:
-		if parts[1] != "" {
-			return parts[1], urlPath
+	case 0:
+		return strings.ToLower(req.Method), urlPath, ""
+	case 1:
+		index := parts[0]
+		if strings.HasPrefix(index, "_") {
+			index = "" // cluster-level endpoint, no index namespace
 		}
-		return strings.ToLower(req.Method), urlPath
+		return strings.ToLower(req.Method), urlPath, index
+	default:
+		index := parts[0]
+		if strings.HasPrefix(index, "_") {
+			index = ""
+		}
+		if parts[1] != "" {
+			return parts[1], urlPath, index
+		}
+		return strings.ToLower(req.Method), urlPath, index
 	}
 }
