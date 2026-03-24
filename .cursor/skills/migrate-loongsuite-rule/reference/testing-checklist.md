@@ -89,13 +89,16 @@ Write `test/e2e/<name>_test.go` with `//go:build e2e` **only** when multiple ins
 All must pass. Fix failures before marking migration complete.
 
 ```bash
-go test -C pkg/instrumentation/<name> ./...  # unit
-make format/license                           # license headers
+go test -C pkg/instrumentation/<name> ./...  # unit tests (run directly — see note below)
+make lint/license-header/fix                  # add missing license headers
 make go-mod-tidy && make crosslink            # module consistency
-make build                                    # packages hooks into binary
-make test-integration                         # integration
+make test-integration                         # end-to-end validation (includes build step)
 make lint/go                                  # linter — no suppressions
 ```
+
+> `make test-integration` depends on `make build` and `make build-demo` internally — do not run `make build` separately before it; just call `make test-integration` directly.
+
+> The convenience alias `make format` runs `format/go`, `format/yaml`, and `lint/license-header/fix` together and can replace the standalone license step above.
 
 ## Common Pitfalls
 
@@ -106,4 +109,4 @@ make lint/go                                  # linter — no suppressions
 - **Test app location**: `TestFixture` resolves apps from `test/apps/<name>/`; directory name must match `BuildAndRun()` argument. For multi-version apps, use path-like names: `f.BuildAndRun("<name>/<version>")` resolves to `test/apps/<name>/<version>/`
 - **Multi-version: only one version migrated**: always check `loongsuite-go-agent/test/<name>/` for ALL version subdirectories in Step 0. Create a test app and integration sub-test for EACH version, not just the first or minimum
 - **Multi-version: `make tidy/test-apps`**: uses `find test/apps -name "go.mod"` so nested version directories are auto-discovered — no Makefile changes needed
-- **Struct-injection modules excluded from make test-unit/pkg**: if your instrumentation uses struct injection, `go test -C pkg/instrumentation/<name> ./...` directly instead of relying on the make target
+- **Struct-injection modules excluded from `make test-unit/pkg`**: the Makefile excludes `runtime`, `databasesql`, and the root `pkg` module from `make test-unit/pkg`. Any new instrumentation that uses struct injection (Complex-DB tier) must also be excluded there, or run unit tests directly via `go test -C pkg/instrumentation/<name> ./...` instead of relying on the make target

@@ -170,13 +170,14 @@ For Messaging: write an E2E test (`test/e2e/<name>_test.go`) if context propagat
 Run every command. Fix failures before considering the migration done:
 
 ```bash
-go test -C pkg/instrumentation/<name> ./...  # unit tests
-make format/license                           # license headers
+go test -C pkg/instrumentation/<name> ./...  # unit tests (run directly — see pitfall below)
+make lint/license-header/fix                  # add missing license headers
 make go-mod-tidy && make crosslink            # module consistency
-make build                                    # packages hooks into binary
-make test-integration                         # end-to-end validation
+make test-integration                         # end-to-end (includes build internally)
 make lint/go                                  # no lint suppression allowed
 ```
+
+> `make test-integration` already depends on `make build` and `make build-demo` — do not run `make build` separately first.
 
 **Final checklist:**
 - [ ] Apache 2.0 header on every `.go` file

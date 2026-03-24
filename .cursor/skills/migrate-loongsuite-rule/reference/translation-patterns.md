@@ -15,7 +15,11 @@
 | `FieldName` + `FieldType` | `new_field: [{name, type}]` | |
 | `Dependencies` | (not supported) | Drop — no equivalent |
 
-Version: `[1.3.0,1.7.4)` → `v1.3.0,v1.7.4`. Single minimum: `[v1.2.0,)` → `v1.2.0`.
+Version range encoding rules:
+- Range with upper bound: `[1.3.0,1.7.4)` → `v1.3.0,v1.7.4` (left-inclusive, right-exclusive; drop brackets, ensure `v` prefix on both values).
+- Minimum only (open upper): `[v1.2.0,)` → `v1.2.0` (single value, no trailing comma).
+- No constraint: omit the `version` field entirely — the rule applies to all versions.
+- Single value means "this version and above" with no upper bound.
 
 ## 2. go.mod Template
 
