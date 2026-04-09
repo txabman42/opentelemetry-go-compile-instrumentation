@@ -12,7 +12,8 @@ SHELL := /bin/bash
         test-unit/coverage test-unit/tool/coverage test-unit/pkg/coverage \
         test-integration/coverage test-e2e/coverage \
         registry-diff registry-check registry-resolve weaver-install tidy/test-apps \
-        adr-tools adr-new adr-list
+        adr-tools adr-new adr-list \
+        benchmark benchmark/run
 
 # Constant variables
 BINARY_NAME := otelc
@@ -23,7 +24,7 @@ INST_PKG_TMP = pkg_temp
 API_SYNC_SOURCE = pkg/inst/context.go
 API_SYNC_TARGET = tool/internal/instrument/api.tmpl
 TOOLS_DIR = .tools
-GO_VERSION = 1.24
+GO_VERSION = 1.25
 
 ##@ Tooling
 
@@ -346,6 +347,37 @@ check-golden-files: package
 	git status --porcelain -- tool/internal/instrument/testdata/golden/ | grep -q . && (echo "Golden files have untracked changes"; exit 1) || true
 	echo "Golden files are up to date"
 
+##@ Benchmarking
+
+BENCH_HARNESS_DIR := test/bench/cmd/bench
+BENCH_SCENARIOS_DIR := test/bench/scenarios
+BENCH_OUTPUT := bench.json
+BENCH_ITERATIONS ?= 5
+BENCH_WARMUP ?= 1
+BENCH_MAX_OVERHEAD_PCT ?= -1
+
+benchmark: build ## Build benchmark harness and print usage
+	@echo "Building benchmark harness..."
+	@go build -C $(BENCH_HARNESS_DIR) -o $(TOOLS)/bench .
+	@echo ""
+	@echo "Run benchmarks with: make benchmark/run"
+	@echo "Override iterations: make benchmark/run BENCH_ITERATIONS=10"
+
+.ONESHELL:
+benchmark/run: build ## Run compile-time benchmarks and emit bench.json
+benchmark/run: benchmark
+	@echo "Running compile-time benchmarks (iterations=$(BENCH_ITERATIONS), warmup=$(BENCH_WARMUP))..."
+	set -euo pipefail
+	nice -n -10 $(TOOLS)/bench \
+		-otelc=$(CURDIR)/$(BINARY_NAME) \
+		-scenarios=$(CURDIR)/$(BENCH_SCENARIOS_DIR) \
+		-iterations=$(BENCH_ITERATIONS) \
+		-warmup=$(BENCH_WARMUP) \
+		-max-overhead-pct=$(BENCH_MAX_OVERHEAD_PCT) \
+		-output=$(CURDIR)/$(BENCH_OUTPUT)
+	@echo ""
+	@echo "Results written to $(BENCH_OUTPUT)"
+
 ##@ Testing
 # NOTE: Tests require the 'package' target to run first because tool/data/export.go
 # uses //go:embed to embed otelc-pkg.gz at compile time. If the file doesn't exist
@@ -373,7 +405,7 @@ test-unit/tool: build package $(GOTESTFMT) ## Run unit tests for tool modules on
 	go test -json -v -shuffle=on -timeout=5m -count=1 ./tool/... 2>&1 | tee ./gotest-unit-tool.log
 
 # Notes on test-unit/pkg implementation:
-# - Uses find -maxdepth 3 to discover modules at pkg/instrumentation/{name}/ level only.
+# - Uses find -maxdepth 4 to discover modules at pkg/instrumentation/{name}/ and pkg/instrumentation/{name}/{sub} levels only.
 #   This naturally excludes client/ and server/ subdirectories (which will have link errors because it requires the parent module to be built).
 # - Excludes "runtime" and "databasesql" modules (have build errors because of compile-time field injection) and root "pkg" module (no tests).
 # - Skips modules without test files to avoid empty test output.
@@ -386,7 +418,7 @@ test-unit/pkg: package ## Run unit tests for pkg modules only
 	@echo "Running pkg unit tests..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
-	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
+	PKG_MODULES=$$(find pkg -maxdepth 4 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
@@ -429,7 +461,7 @@ test-unit/pkg/coverage: package ## Run unit tests with coverage for pkg modules 
 	@echo "Running pkg unit tests with coverage..."
 	set -euo pipefail
 	rm -f ./gotest-unit-pkg.log
-	PKG_MODULES=$$(find pkg -maxdepth 3 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
+	PKG_MODULES=$$(find pkg -maxdepth 4 -name "go.mod" -type f -exec dirname {} \; | grep -v "runtime" | grep -v "databasesql" | grep -v "^pkg$$"); \
 	for moddir in $$PKG_MODULES; do \
 		if ! find "$$moddir" -name "*_test.go" -type f | grep -q .; then \
 			echo "Skipping $$moddir (no tests)..."; \
