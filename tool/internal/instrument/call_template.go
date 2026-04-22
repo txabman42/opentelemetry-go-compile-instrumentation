@@ -4,6 +4,7 @@
 package instrument
 
 import (
+	"fmt"
 	"go/format"
 	"go/parser"
 	"go/token"
