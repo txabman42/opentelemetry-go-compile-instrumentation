@@ -105,12 +105,12 @@ make test-e2e/coverage
 ## Coverage
 
 > [!NOTE]
-> The project enforces a **≥74% unit-test coverage** floor for both the `tool/` and `pkg/` module trees.
+> The project enforces a **≥70% unit-test coverage** floor for both the `tool/` and `pkg/` module trees.
 > Codecov checks each tree against the target and **blocks the PR** when coverage drops below it.
 
 ### Coverage target rationale
 
-The 74% floor is the minimum bar agreed in [issue #569](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/569)
+The 70% floor is the minimum bar agreed in [issue #569](https://github.com/open-telemetry/opentelemetry-go-compile-instrumentation/issues/569)
 (tracked under the release 1.0.0 roadmap). Coverage is tracked **per module tree** — `tool/` and
 `pkg/` are checked independently so that one area cannot mask regression in the other.
 
@@ -121,7 +121,7 @@ The `test-unit-coverage` job in `.github/workflows/test-unit.yaml`:
 1. Runs `make test-unit/coverage` to generate `coverage-tool.txt` and `coverage-pkg.txt`.
 2. Uploads both files to Codecov for historical tracking (flags: `tool`, `pkg`).
 
-Codecov evaluates each flag against the 74% target defined in `codecov.yml` and posts the result
+Codecov evaluates each flag against the 70% target defined in `codecov.yml` and posts the result
 as an **enforcing** status check (`informational: false`): a coverage shortfall below the target
 fails the check and blocks the PR.
 
