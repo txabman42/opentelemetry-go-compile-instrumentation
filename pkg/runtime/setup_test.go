@@ -29,7 +29,11 @@ func TestLogLevel(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.envValue, func(t *testing.T) {
+		name := tt.envValue
+		if name == "" {
+			name = "unset"
+		}
+		t.Run(name, func(t *testing.T) {
 			t.Setenv("OTEL_LOG_LEVEL", tt.envValue)
 			assert.Equal(t, tt.expected, logLevel())
 		})
