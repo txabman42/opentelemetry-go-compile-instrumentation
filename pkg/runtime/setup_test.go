@@ -6,7 +6,6 @@ package runtime
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -75,24 +74,23 @@ func TestSetupOpenTelemetry(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
 	restoreProviders(t)
 
-	err := setupOpenTelemetry(Config{
-		ServiceName:            "test-service",
-		ServiceVersion:         "1.0.0",
+	setupOpenTelemetry(Config{
 		InstrumentationName:    "test-inst",
 		InstrumentationVersion: "2.0.0",
 	})
-	require.NoError(t, err)
+	assert.NotNil(t, tracerProvider, "trace provider should be configured when an OTLP endpoint is set")
 }
 
 func TestSetupOpenTelemetryExporterError(t *testing.T) {
 	// An invalid protocol makes the exporter fail to build, but setupOpenTelemetry
-	// logs and swallows the error rather than propagating it.
+	// logs and swallows the error rather than propagating it or panicking.
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
 	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "invalid-protocol")
 	restoreProviders(t)
 
-	err := setupOpenTelemetry(Config{ServiceName: "test-service"})
-	require.NoError(t, err)
+	assert.NotPanics(t, func() {
+		setupOpenTelemetry(Config{InstrumentationName: "test-service"})
+	})
 }
 
 func TestInitializePanicRecovery(t *testing.T) {
@@ -101,15 +99,13 @@ func TestInitializePanicRecovery(t *testing.T) {
 	origLogger := logger
 	t.Cleanup(func() {
 		logger = origLogger
-		initOnce = sync.Once{}
 	})
 	restoreProviders(t)
 
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
 	logger = nil
-	initOnce = sync.Once{}
 
 	assert.NotPanics(t, func() {
-		Initialize(Config{ServiceName: "test-service"})
+		Initialize(Config{InstrumentationName: "test-service"})
 	})
 }
