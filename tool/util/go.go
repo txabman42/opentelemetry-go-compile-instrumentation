@@ -92,6 +92,61 @@ func IsCgoCommand(line string) bool {
 		!strings.Contains(line, "-dynimport")
 }
 
+// splitGoflags splits a GOFLAGS value into tokens like the go command does
+// (cmd/internal/quoted.Split): space-separated, but a token starting with a
+// quote runs to the matching close quote. Quotes are kept so tokens re-join
+// verbatim.
+func splitGoflags(goflags string) []string {
+	var tokens []string
+	i := 0
+	for i < len(goflags) {
+		for i < len(goflags) && (goflags[i] == ' ' || goflags[i] == '\t') {
+			i++
+		}
+		if i >= len(goflags) {
+			break
+		}
+		start := i
+		if q := goflags[i]; q == '\'' || q == '"' {
+			i++
+			for i < len(goflags) && goflags[i] != q {
+				i++
+			}
+			if i < len(goflags) {
+				i++ // include the closing quote
+			}
+		} else {
+			for i < len(goflags) && goflags[i] != ' ' && goflags[i] != '\t' {
+				i++
+			}
+		}
+		tokens = append(tokens, goflags[start:i])
+	}
+	return tokens
+}
+
+// StripToolexecFromGoflags returns goflags without any -toolexec entry. In
+// drop-in mode the go commands otelc spawns would inherit the flag and
+// recursively re-invoke otelc; stripping it lets each command choose its
+// children's toolexec: none for setup discovery, an explicit CLI flag for
+// `otelc go build`, and nested version-only mode during instrumentation.
+func StripToolexecFromGoflags(goflags string) string {
+	tokens := splitGoflags(goflags)
+	kept := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		unquoted := token
+		if len(unquoted) >= 2 && (unquoted[0] == '\'' || unquoted[0] == '"') &&
+			unquoted[len(unquoted)-1] == unquoted[0] {
+			unquoted = unquoted[1 : len(unquoted)-1]
+		}
+		if unquoted == "-toolexec" || strings.HasPrefix(unquoted, "-toolexec=") {
+			continue
+		}
+		kept = append(kept, token)
+	}
+	return strings.Join(kept, " ")
+}
+
 // FindFlagValue finds the value of a flag in the command line.
 func FindFlagValue(cmd []string, flag string) string {
 	flagWithValue := flag + "="
