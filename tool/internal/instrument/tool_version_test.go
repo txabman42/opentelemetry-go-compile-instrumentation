@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,10 +29,12 @@ func TestToolVersionLine(t *testing.T) {
 		assert.Equal(t, "compile version go1.26.5 "+marker+"/abcd1234", got)
 	})
 
-	t.Run("devel toolchain keeps buildID as the last field", func(t *testing.T) {
+	t.Run("devel toolchain changes the content ID used by Go", func(t *testing.T) {
 		line := "compile version devel go1.27-abc123 buildID=x/y/z"
 		got := toolVersionLine(line, "abcd1234")
-		assert.Equal(t, "compile version devel go1.27-abc123 "+marker+"/abcd1234 buildID=x/y/z", got)
+		assert.Equal(t, "compile version devel go1.27-abc123 buildID=x/y/z+"+marker+"+abcd1234", got)
+		contentID := got[strings.LastIndex(got, "/")+1:]
+		assert.Equal(t, "z+"+marker+"+abcd1234", contentID)
 	})
 }
 

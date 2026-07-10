@@ -355,15 +355,20 @@ func interceptLink(ctx context.Context, args []string) ([]string, error) {
 // toolVersionLine appends an otelc marker to a `tool -V=full` line so the tool
 // ID (and every build cache key derived from it) differs from a plain build.
 // The rules hash is included so editing the config invalidates cached
-// artifacts too. A devel toolchain's line ends in `buildID=...` and go keys
-// the cache on that field alone, so the marker goes just before it.
+// artifacts too. For devel toolchains, Go uses only the content ID in the
+// trailing `buildID=...` field, so append the marker to that field's value.
 func toolVersionLine(line, rulesHash string) string {
+	hasBuildID := strings.Contains(line, " buildID=")
 	marker := "otelc@" + util.Version
 	if rulesHash != "" {
-		marker += "/" + rulesHash
+		if hasBuildID {
+			marker += "+" + rulesHash
+		} else {
+			marker += "/" + rulesHash
+		}
 	}
-	if idx := strings.LastIndex(line, " buildID="); idx >= 0 {
-		return line[:idx] + " " + marker + line[idx:]
+	if hasBuildID {
+		return line + "+" + marker
 	}
 	return line + " " + marker
 }
