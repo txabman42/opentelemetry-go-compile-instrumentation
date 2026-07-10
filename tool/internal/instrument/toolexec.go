@@ -368,6 +368,18 @@ func toolVersionLine(line, rulesHash string) string {
 	return line + " " + marker
 }
 
+// markedToolVersion turns a tool's raw `-V=full` output into the line otelc
+// reports in its place: the version with an otelc marker, plus the current
+// matched-rules hash when one exists.
+func markedToolVersion(rawOutput string) string {
+	var rulesHash string
+	if content, err := os.ReadFile(util.GetMatchedRuleFile()); err == nil {
+		sum := sha256.Sum256(content)
+		rulesHash = hex.EncodeToString(sum[:8])
+	}
+	return toolVersionLine(strings.TrimSpace(rawOutput), rulesHash)
+}
+
 // interceptToolVersion handles the `tool -V=full` probe go uses to compute
 // tool IDs, printing the tool's own version line with an otelc marker added.
 func interceptToolVersion(ctx context.Context, args []string) error {
@@ -378,14 +390,8 @@ func interceptToolVersion(ctx context.Context, args []string) error {
 		return ex.Wrapf(err, "running %v", args)
 	}
 
-	var rulesHash string
-	if content, readErr := os.ReadFile(util.GetMatchedRuleFile()); readErr == nil {
-		sum := sha256.Sum256(content)
-		rulesHash = hex.EncodeToString(sum[:8])
-	}
-
 	// The line goes to stdout: it is the answer go itself is waiting for.
-	_, err = os.Stdout.WriteString(toolVersionLine(strings.TrimSpace(string(out)), rulesHash) + "\n")
+	_, err = os.Stdout.WriteString(markedToolVersion(string(out)) + "\n")
 	if err != nil {
 		return ex.Wrapf(err, "writing tool version")
 	}

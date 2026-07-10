@@ -5,6 +5,8 @@ package instrument
 
 import (
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,6 +32,53 @@ func TestToolVersionLine(t *testing.T) {
 		line := "compile version devel go1.27-abc123 buildID=x/y/z"
 		got := toolVersionLine(line, "abcd1234")
 		assert.Equal(t, "compile version devel go1.27-abc123 "+marker+"/abcd1234 buildID=x/y/z", got)
+	})
+}
+
+func TestMarkedToolVersion(t *testing.T) {
+	const raw = "compile version go1.26.5\n"
+
+	t.Run("no rules hash when matched.json is absent", func(t *testing.T) {
+		t.Setenv(util.EnvOtelcWorkDir, t.TempDir())
+
+		got := markedToolVersion(raw)
+		assert.Equal(t, "compile version go1.26.5 otelc@"+util.Version, got)
+	})
+
+	t.Run("appends a 16-hex-digit rules hash when matched.json is present", func(t *testing.T) {
+		workDir := t.TempDir()
+		t.Setenv(util.EnvOtelcWorkDir, workDir)
+		require.NoError(t, os.MkdirAll(filepath.Join(workDir, util.BuildTempDir), 0o755))
+		require.NoError(t, os.WriteFile(util.GetMatchedRuleFile(), []byte(`[{"module_path":"main"}]`), 0o644))
+
+		got := markedToolVersion(raw)
+		assert.Regexp(t, `^compile version go1\.26\.5 otelc@\S+/[0-9a-f]{16}$`, got)
+	})
+}
+
+func TestEnableNestedToolexec(t *testing.T) {
+	exe, err := os.Executable()
+	require.NoError(t, err)
+
+	t.Run("appends to existing GOFLAGS and sets the nested marker", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "-mod=mod")
+		t.Setenv(util.EnvOtelcNestedToolexec, "")
+
+		require.NoError(t, EnableNestedToolexec())
+
+		goflags := os.Getenv("GOFLAGS")
+		assert.Contains(t, goflags, "-mod=mod", "existing flags are preserved")
+		assert.Contains(t, goflags, "'-toolexec="+exe+" toolexec'", "otelc is added as the toolexec")
+		assert.Equal(t, "1", os.Getenv(util.EnvOtelcNestedToolexec))
+	})
+
+	t.Run("handles empty GOFLAGS without leading whitespace", func(t *testing.T) {
+		t.Setenv("GOFLAGS", "")
+		t.Setenv(util.EnvOtelcNestedToolexec, "")
+
+		require.NoError(t, EnableNestedToolexec())
+
+		assert.Equal(t, "'-toolexec="+exe+" toolexec'", os.Getenv("GOFLAGS"))
 	})
 }
 
