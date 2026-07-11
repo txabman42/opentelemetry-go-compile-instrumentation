@@ -93,9 +93,10 @@ func IsCgoCommand(line string) bool {
 }
 
 // splitGoflags splits a GOFLAGS value into tokens like the go command does
-// (cmd/internal/quoted.Split): space-separated, but a token starting with a
-// quote runs to the matching close quote. Quotes are kept so tokens re-join
-// verbatim.
+// (https://cs.opensource.google/go/go/+/master:src/cmd/internal/quoted/quoted.go)
+//
+// space-separated, but a token starting with a quote runs to the matching close quote.
+// Quotes are kept so tokens re-join verbatim.
 func splitGoflags(goflags string) []string {
 	var tokens []string
 	i := 0
