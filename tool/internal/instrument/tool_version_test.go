@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -94,4 +95,13 @@ func TestLoadMissingMatchedRules(t *testing.T) {
 	_, err := ip.load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "otelc setup")
+}
+
+// versionMarkerPattern documents the exact tool-ID shape the go build cache
+// keys on, guarding against accidental format drift.
+var versionMarkerPattern = regexp.MustCompile(`otelc@[^\s/]+(/[0-9a-f]{16})?`)
+
+func TestToolVersionLineMatchesCachePattern(t *testing.T) {
+	assert.Regexp(t, versionMarkerPattern, toolVersionLine("compile version go1.26.5", ""))
+	assert.Regexp(t, versionMarkerPattern, toolVersionLine("compile version go1.26.5", "0123456789abcdef"))
 }

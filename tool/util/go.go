@@ -5,7 +5,6 @@ package util
 
 import (
 	"bufio"
-	"fmt"
 	"os"
 	"strings"
 
@@ -168,7 +167,7 @@ func QuoteGoflagsToken(token string) (string, error) {
 	case !hasDoubleQuote:
 		return "\"" + token + "\"", nil
 	default:
-		return "", fmt.Errorf("cannot quote token containing both single and double quotes: %q", token)
+		return "", ex.Newf("cannot quote token containing both single and double quotes: %q", token)
 	}
 }
 
