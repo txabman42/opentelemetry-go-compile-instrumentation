@@ -473,7 +473,11 @@ func EnableNestedToolexec() error {
 	if err != nil {
 		return ex.Wrapf(err, "resolving otelc executable path")
 	}
-	goflags := strings.TrimSpace(os.Getenv("GOFLAGS") + fmt.Sprintf(" '-toolexec=%s toolexec'", execPath))
+	toolexecFlag, err := util.QuoteGoflagsToken(fmt.Sprintf("-toolexec=%s toolexec", execPath))
+	if err != nil {
+		return ex.Wrapf(err, "quoting nested toolexec GOFLAGS entry")
+	}
+	goflags := strings.TrimSpace(os.Getenv("GOFLAGS") + " " + toolexecFlag)
 	if err = os.Setenv("GOFLAGS", goflags); err != nil {
 		return ex.Wrapf(err, "setting GOFLAGS for nested go commands")
 	}
